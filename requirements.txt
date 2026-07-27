@@ -8,7 +8,7 @@ uvicorn[standard]
 jinja2
 
 # Database toolkit (ORM)
-sqlalchemy
+sqlalchemy==2.0.41
 
 # PostgreSQL driver (works with Supabase)
 psycopg[binary]

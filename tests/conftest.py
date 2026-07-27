@@ -57,28 +57,39 @@ def _sqlite_uuid_lookup_shim(monkeypatch):
     """
     SQLite-only test shim.
 
-    In production (PostgreSQL + psycopg), get_current_user looks a user up with
-    the token's `sub` claim, which is a *string* UUID, and the driver compares it
-    against the UUID column fine. SQLAlchemy's generic `Uuid` type — used when we
-    run against SQLite in tests — instead requires a real `uuid.UUID` object at
-    bind time. We coerce str -> UUID at the lookup boundary so the tests exercise
-    the real get_current_user logic without changing any application code.
+    In production (PostgreSQL + psycopg), a user is looked up with the token's
+    `sub` claim, which is a *string* UUID, and the driver compares it against the
+    UUID column fine. SQLAlchemy's generic `Uuid` type — used when we run against
+    SQLite in tests — instead requires a real `uuid.UUID` object at bind time. We
+    coerce str -> UUID at the lookup boundary so the tests exercise the real
+    get_current_user / refresh logic without changing any application code.
+
+    Two call sites take a string `sub` and must both be shimmed:
+      * dependencies.get_user_by_id  — used by get_current_user (protected routes)
+      * auth_service.get_user_by_id  — used by the /auth/refresh route
     """
     import uuid as _uuid
 
+    import auth_service
     import dependencies
 
-    original = dependencies.get_user_by_id
+    def _coercing(original):
+        def _patched(db, user_id):
+            if isinstance(user_id, str):
+                try:
+                    user_id = _uuid.UUID(user_id)
+                except ValueError:
+                    return None
+            return original(db, user_id)
 
-    def _patched(db, user_id):
-        if isinstance(user_id, str):
-            try:
-                user_id = _uuid.UUID(user_id)
-            except ValueError:
-                return None
-        return original(db, user_id)
+        return _patched
 
-    monkeypatch.setattr(dependencies, "get_user_by_id", _patched)
+    monkeypatch.setattr(
+        dependencies, "get_user_by_id", _coercing(dependencies.get_user_by_id)
+    )
+    monkeypatch.setattr(
+        auth_service, "get_user_by_id", _coercing(auth_service.get_user_by_id)
+    )
 
 
 @pytest.fixture()
