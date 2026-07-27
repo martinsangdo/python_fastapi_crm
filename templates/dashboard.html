@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <main class="card">
+        <div class="brand">CRM</div>
+        <!-- The logged-in user's name is filled in by JavaScript. -->
+        <h1>Hello, <span id="user-name">…</span></h1>
+        <p class="subtitle">You are logged in to the CRM.</p>
+
+        <!-- A small area showing the account details fetched from the API. -->
+        <dl class="details">
+            <dt>Email</dt>
+            <dd id="user-email">…</dd>
+        </dl>
+
+        <!-- The logout button. -->
+        <button id="logout-btn" class="btn">Log out</button>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script>
+        // 1. Guard: if there is no token, bounce to the login page at once.
+        Auth.requireLogin();
+
+        // 2. Ask the API who we are and show the name + email.
+        async function loadUser() {
+            try {
+                const response = await Auth.apiFetch("/auth/me");
+                const user = await response.json();
+                document.getElementById("user-name").textContent = user.full_name;
+                document.getElementById("user-email").textContent = user.email;
+            } catch (err) {
+                // apiFetch already redirects on a 401; nothing else to do.
+            }
+        }
+        loadUser();
+
+        // 3. Wire up the logout button.
+        document
+            .getElementById("logout-btn")
+            .addEventListener("click", () => Auth.logout());
+    </script>
+</body>
+</html>

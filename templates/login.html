@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <!-- A centered card holding the login form. -->
+    <main class="card">
+        <div class="brand">CRM</div>
+        <h1>Welcome back</h1>
+        <p class="subtitle">Log in to your CRM account.</p>
+
+        <!-- The login form. JavaScript (below) handles the submit; the page
+             never reloads. -->
+        <form id="login-form" class="form">
+            <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" autocomplete="email" required />
+            </label>
+
+            <label class="field">
+                <span>Password</span>
+                <input type="password" name="password"
+                       autocomplete="current-password" required />
+            </label>
+
+            <button type="submit" class="btn">Log in</button>
+
+            <!-- Any error message from the server appears here. -->
+            <p id="error" class="error" role="alert"></p>
+        </form>
+
+        <p class="hint">
+            Don't have an account? <a href="/register">Create one</a>
+        </p>
+        <p class="hint">
+            Seed account: <code>admin@example.com</code> / <code>Password123!</code>
+        </p>
+    </main>
+
+    <!-- Our shared auth helper (login, token storage, redirects). -->
+    <script src="/static/auth.js"></script>
+    <script>
+        // If the visitor is already logged in, skip the form.
+        if (Auth.isLoggedIn()) {
+            window.location.href = "/dashboard";
+        }
+
+        const form = document.getElementById("login-form");
+        const errorBox = document.getElementById("error");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();      // stop the normal page reload
+            errorBox.textContent = "";
+
+            const email = form.email.value.trim();
+            const password = form.password.value;
+
+            try {
+                await Auth.login(email, password);   // stores tokens on success
+                window.location.href = "/dashboard"; // go to the protected page
+            } catch (err) {
+                errorBox.textContent = err.message;
+            }
+        });
+    </script>
+</body>
+</html>

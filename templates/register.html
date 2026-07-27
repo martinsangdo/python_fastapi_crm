@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <!-- A centered card holding the registration form. -->
+    <main class="card">
+        <div class="brand">CRM</div>
+        <h1>Create account</h1>
+        <p class="subtitle">Sign up to start using the CRM.</p>
+
+        <!-- The registration form. JavaScript (below) handles the submit; the
+             page never reloads. -->
+        <form id="register-form" class="form">
+            <label class="field">
+                <span>Full name</span>
+                <input type="text" name="full_name" autocomplete="name" required />
+            </label>
+
+            <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" autocomplete="email" required />
+            </label>
+
+            <label class="field">
+                <span>Password</span>
+                <!-- minlength matches the 8-character rule in schemas.py. -->
+                <input type="password" name="password" minlength="8"
+                       autocomplete="new-password" required />
+            </label>
+
+            <button type="submit" class="btn">Create account</button>
+
+            <!-- Any error message from the server appears here. -->
+            <p id="error" class="error" role="alert"></p>
+        </form>
+
+        <p class="hint">
+            Already have an account? <a href="/login">Log in</a>
+        </p>
+    </main>
+
+    <!-- Our shared auth helper (register, login, token storage, redirects). -->
+    <script src="/static/auth.js"></script>
+    <script>
+        // If the visitor is already logged in, skip the form.
+        if (Auth.isLoggedIn()) {
+            window.location.href = "/dashboard";
+        }
+
+        const form = document.getElementById("register-form");
+        const errorBox = document.getElementById("error");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();      // stop the normal page reload
+            errorBox.textContent = "";
+
+            const fullName = form.full_name.value.trim();
+            const email = form.email.value.trim();
+            const password = form.password.value;
+
+            try {
+                // register() also logs the new user in on success.
+                await Auth.register(fullName, email, password);
+                window.location.href = "/dashboard";
+            } catch (err) {
+                errorBox.textContent = err.message;
+            }
+        });
+    </script>
+</body>
+</html>

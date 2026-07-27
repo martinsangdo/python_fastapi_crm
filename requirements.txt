@@ -15,3 +15,15 @@ psycopg[binary]
 
 # Loads variables from the .env file
 python-dotenv
+
+# Hashes passwords safely (never store plain-text passwords!)
+bcrypt
+
+# Creates and reads JWT access/refresh tokens
+PyJWT
+
+# Validates email addresses inside Pydantic schemas (pydantic[email])
+email-validator
+
+# Lets FastAPI read form data (used by the interactive /docs login form)
+python-multipart
