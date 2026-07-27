@@ -1,0 +1,204 @@
+================================================================================
+IMPLEMENTATION PROMPT — DASHBOARD MODULE
+CRM System: FastAPI + PostgreSQL (Supabase) + Jinja2/HTML/CSS/JS + JWT + RBAC
+================================================================================
+
+ROLE
+You are a senior FastAPI engineer extending an existing, beginner-oriented CRM
+scaffold. Match the codebase style: layered architecture, thin permission-guarded
+routers, verbose explanatory comments. This is a READ-ONLY aggregation module: it
+computes summary metrics from existing tables. It creates NO new business tables.
+Reuse get_current_user and require_permission(code).
+
+--------------------------------------------------------------------------------
+1. MODULE OVERVIEW
+--------------------------------------------------------------------------------
+Purpose:
+- Provide the landing screen after login: at-a-glance KPIs and small trend
+  visualizations summarizing customers, products, and orders.
+
+Business objectives:
+- Give every authenticated user an immediate operational snapshot.
+- Surface headline numbers (revenue, order counts, active customers, low stock)
+  and short trends without navigating into each module.
+- Respect RBAC: only show cards a user is allowed to see.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCIES
+--------------------------------------------------------------------------------
+Existing modules required:
+- Authentication (get_current_user), RBAC require_permission(code).
+- Customers, Products, Orders modules (their tables must exist for real data;
+  return zeros/empty gracefully if a table is empty).
+
+Existing database tables used (read-only):
+- `customers`, `products`, `orders`, `order_items`, `users`.
+
+New tables required:
+- NONE. (Optional future optimization: a materialized view or cache table — out
+  of scope for this scaffold. Compute live with SQL aggregates.)
+
+--------------------------------------------------------------------------------
+3. DATABASE
+--------------------------------------------------------------------------------
+- No new tables. Use aggregate SQL queries (COUNT, SUM, GROUP BY, date_trunc)
+  over existing tables. Prefer set-based queries over Python loops.
+- Ensure the aggregate queries use existing indexes (orders.created_at,
+  orders.status, products.is_active, customers.status). If a needed index is
+  missing, add it idempotently in the owning module's SQL, not here.
+- Exclude 'cancelled' orders from revenue metrics; count revenue from orders in
+  paid/shipped/completed (define the revenue-status set once and reuse).
+
+--------------------------------------------------------------------------------
+4. BACKEND
+--------------------------------------------------------------------------------
+No SQLAlchemy models (read-only). Optionally add lightweight query helpers.
+
+Pydantic schemas (dashboard_schemas.py):
+- KpiCards -> total_customers, active_customers, total_products,
+              low_stock_products, total_orders, orders_last_30_days,
+              revenue_total (Decimal), revenue_last_30_days (Decimal),
+              open_orders (draft+confirmed)
+- TrendPoint -> period (date/label), value (Decimal or int)
+- DashboardSummary -> kpis: KpiCards,
+                      revenue_trend: list[TrendPoint],      (last 12 months)
+                      orders_by_status: list[{status, count}],
+                      top_products: list[{product_id, name, qty_sold, revenue}],
+                      recent_orders: list[OrderListItem-lite]
+
+Repository/Service (dashboard_service.py) — read-only, no ValueError writes:
+- get_kpis(db) -> KpiCards
+- get_revenue_trend(db, months=12) -> list[TrendPoint]   (date_trunc('month'))
+- get_orders_by_status(db) -> list[...]
+- get_top_products(db, limit=5, days=30) -> list[...]     (join order_items)
+- get_recent_orders(db, limit=5)
+- get_dashboard_summary(db, current_user) -> DashboardSummary, assembling only
+  the sections the user is permitted to see (see §6/§7).
+- low_stock threshold configurable (default stock_qty <= 5).
+
+Router (routers/dashboard.py):
+- GET /api/dashboard/summary  -> DashboardSummary   (permission: see §7)
+- (Optional granular endpoints GET /api/dashboard/kpis, /revenue-trend, etc.)
+- Thin; all logic in service.
+
+Validation/Error handling:
+- 401 without token; 403 if the user lacks the dashboard/read permission.
+- Empty datasets return zeros/empty arrays, never 500.
+- Money returned as Decimal-serialized strings/numbers; consistent currency note.
+
+--------------------------------------------------------------------------------
+5. REST APIs
+--------------------------------------------------------------------------------
+(1) Dashboard summary
+    URL: GET /api/dashboard/summary
+    Query: (optional) date_from, date_to to scope trend/revenue
+    Description: All KPI cards + trends the caller is permitted to see.
+    Response: DashboardSummary (sections omitted/empty if not permitted)
+    Permission: dashboard.view  (see §7 for the fallback if not seeding it)
+
+(2) (Optional) KPI cards only
+    URL: GET /api/dashboard/kpis
+    Response: KpiCards
+    Permission: dashboard.view
+
+(3) (Optional) Revenue trend
+    URL: GET /api/dashboard/revenue-trend?months=12
+    Response: list[TrendPoint]
+    Permission: dashboard.view (and gated further by orders.read)
+
+--------------------------------------------------------------------------------
+6. BUSINESS RULES
+--------------------------------------------------------------------------------
+- Read-only: the dashboard never mutates data.
+- Revenue counts only non-cancelled orders in the revenue-status set
+  (paid, shipped, completed); 'draft'/'confirmed' are "open", not revenue.
+- "Active customers" = customers.status='active'. "Low stock" = stock_qty <=
+  threshold (default 5) AND is_active. "Open orders" = status in (draft,confirmed).
+- Time windows: "last 30 days" and the 12-month trend are computed in the DB with
+  date_trunc / interval, using created_at.
+- Per-user visibility: each dashboard section is included only if the user holds
+  the underlying module's read permission:
+    * revenue/orders sections require orders.read
+    * top_products requires products.read (and orders.read for qty/revenue)
+    * customer counts require customers.read
+  Sections the user cannot see are omitted (or zeroed) rather than causing 403 on
+  the whole page, so the dashboard is useful for every role.
+- All monetary values are Decimal / NUMERIC(12,2).
+
+--------------------------------------------------------------------------------
+7. AUTHORIZATION
+--------------------------------------------------------------------------------
+Primary gate:
+- dashboard.view — access the dashboard summary.
+  NOTE: this permission is NOT in the current sql/rbac.sql seed. Add it via an
+  idempotent seed insert (module='dashboard', action='view',
+  code='dashboard.view') and grant it to ADMIN, MANAGER, and SALES.
+  ALTERNATIVE (no schema change): gate the page on any authenticated user via
+  get_current_user, and rely on the per-section permission checks below. Pick one
+  approach and document it.
+
+Per-section permissions (used to include/exclude cards):
+- orders.read, products.read, customers.read (see §6).
+- reports.view MAY unlock a richer dashboard variant, but is not required.
+
+--------------------------------------------------------------------------------
+8. FRONTEND
+--------------------------------------------------------------------------------
+Jinja2 dashboard shell (extend the existing templates/dashboard.html) + vanilla
+JS fetching /api/dashboard/summary with the Bearer token (auth.js pattern;
+redirect to /login when unauthenticated). Optional CNN design tokens (near-black
+ink on white, red reserved for accents, 8px grid, square cards).
+
+This module is dashboard-centric, so the standard list/create/edit/detail CRUD
+pages do NOT apply. Instead:
+
+Layout:
+- KPI card row: total revenue (last 30d + all-time), orders (30d), open orders,
+  active customers, low-stock products. Cards show number + short label.
+- Revenue trend: simple 12-month bar/line chart (lightweight inline SVG or a
+  tiny no-dependency renderer; keep it beginner-friendly).
+- Orders-by-status: small breakdown (badges or mini bar).
+- Top products (last 30d): compact table (name, qty sold, revenue).
+- Recent orders: last 5 with order #, customer, status, total, link to detail.
+
+Search / Filters: a global date-range filter (This month / Last 30 days / Last 12
+months / custom) that re-queries the summary. No per-row search.
+
+Pagination / Sorting: not applicable to KPIs; the recent-orders and top-products
+tables are fixed small lists (link out to the full modules for more).
+
+Responsive layout: KPI cards wrap from a 4-up grid to 2-up to 1-up; charts scale
+to container width; tables scroll horizontally on mobile.
+
+Validation: handle empty state ("No data yet") gracefully; loading + error
+states; never render a broken chart on zero data.
+
+Permission-gating: hide cards/sections the user isn't permitted to see; link
+targets (Orders/Products/Customers) shown only if the user has that read perm.
+
+--------------------------------------------------------------------------------
+9. NAVIGATION
+--------------------------------------------------------------------------------
+- "Dashboard" is the first item in the main sidebar and the default post-login
+  landing route (/dashboard).
+- Visible to every authenticated user (content adapts to permissions).
+- Active-state highlight on /dashboard.
+
+--------------------------------------------------------------------------------
+10. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] GET /api/dashboard/summary returns KPIs + trends, JWT-protected.
+[ ] No new business tables; metrics computed with SQL aggregates.
+[ ] Revenue excludes cancelled orders and counts only the revenue-status set.
+[ ] KPIs correct: total/active customers, total/low-stock products,
+    total/30-day orders, open orders, revenue (30d + all-time).
+[ ] 12-month revenue trend and orders-by-status computed via date_trunc/group by.
+[ ] Top products (last 30d) and recent orders lists returned.
+[ ] Sections are included per the caller's read permissions; empty data yields
+    zeros/empty arrays, not 500s.
+[ ] dashboard.view seeded+granted (or documented get_current_user fallback).
+[ ] Dashboard page renders cards, a trend chart, and small tables responsively.
+[ ] All money is Decimal/NUMERIC(12,2), formatted consistently in the UI.
+[ ] "Dashboard" is the default landing route for every logged-in user.
+[ ] Beginner-friendly comments consistent with the codebase.
+================================================================================

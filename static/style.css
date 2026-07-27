@@ -225,3 +225,412 @@ body {
 .details dd:last-child {
     margin-bottom: 0;
 }
+
+/* ===========================================================================
+   Admin pages (Users module and future modules).
+
+   The auth screens use a single centered card. The admin screens instead need
+   a full-width, top-aligned layout with a header bar, a data table and forms.
+   Adding `class="admin-page"` to <body> switches to that layout.
+   =========================================================================== */
+body.admin-page {
+    display: block;             /* stop centering; fill the page top-to-bottom */
+    align-items: stretch;
+    padding: 0;
+    background: #f1f5f9;
+    color: var(--ink);
+}
+
+/* The top header bar shown on every admin page. */
+.topbar {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.9rem 1.5rem;
+    background: #ffffff;
+    border-bottom: 1px solid var(--line);
+}
+
+.topbar .brand {
+    /* Reuse the badge look but smaller and inline (no auto margins). */
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    border-radius: 10px;
+    font-size: 0.95rem;
+}
+
+/* The main navigation links inside the header. */
+.topnav {
+    display: flex;
+    gap: 0.35rem;
+    flex: 1;
+}
+
+.topnav a {
+    padding: 0.45rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.topnav a:hover {
+    background: #f1f5f9;
+    color: var(--ink);
+}
+
+/* The currently active nav item. */
+.topnav a.active {
+    background: #eef2ff;
+    color: var(--brand);
+}
+
+/* The centered content column of an admin page. */
+.admin-main {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 1.75rem 1.5rem 3rem;
+}
+
+/* The page heading row: title on the left, primary action on the right. */
+.page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.page-head h1 {
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    text-align: left;
+}
+
+/* A generic white panel that wraps tables and forms. */
+.panel {
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.panel + .panel {
+    margin-top: 1.25rem;
+}
+
+/* The filter/search bar above the table. */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: end;
+    padding: 1rem 1.1rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.toolbar .field {
+    gap: 0.3rem;
+}
+
+.toolbar input,
+.toolbar select {
+    padding: 0.55rem 0.7rem;
+    font-size: 0.92rem;
+    font-weight: 400;
+    color: var(--ink);
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    outline: none;
+}
+
+.toolbar input:focus,
+.toolbar select:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+/* ---- Data table ---------------------------------------------------------- */
+.table-wrap {
+    overflow-x: auto;   /* let wide tables scroll on small screens */
+}
+
+table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+table.data th,
+table.data td {
+    padding: 0.75rem 1.1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
+table.data th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    background: #f8fafc;
+}
+
+/* Sortable header buttons look like plain text but are clickable. */
+table.data th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+table.data th.sortable:hover {
+    color: var(--ink);
+}
+
+table.data tbody tr:hover {
+    background: #f8fafc;
+}
+
+table.data td:last-child {
+    white-space: normal;
+}
+
+/* Status badges (Active / Inactive). */
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.badge.active {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge.inactive {
+    background: #f1f5f9;
+    color: var(--muted);
+}
+
+.badge.role {
+    background: #eef2ff;
+    color: var(--brand);
+}
+
+/* ---- Buttons (small, secondary, danger variants) ------------------------- */
+.btn.small {
+    width: auto;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+    margin-top: 0;
+}
+
+.btn.secondary {
+    background: #ffffff;
+    color: var(--ink);
+    border: 1px solid var(--line);
+}
+
+.btn.secondary:hover {
+    background: #f1f5f9;
+}
+
+.btn.danger {
+    background: var(--danger);
+}
+
+.btn.danger:hover {
+    background: #b91c1c;
+}
+
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* A horizontal group of row-action buttons/links. */
+.row-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.row-actions a,
+.row-actions button {
+    padding: 0.3rem 0.55rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 7px;
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: #ffffff;
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.row-actions a:hover,
+.row-actions button:hover {
+    background: #f1f5f9;
+}
+
+.row-actions .danger {
+    color: var(--danger);
+    border-color: #fecaca;
+}
+
+/* ---- Pagination ---------------------------------------------------------- */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.1rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.88rem;
+    color: var(--muted);
+}
+
+.pagination .pages {
+    display: flex;
+    gap: 0.4rem;
+}
+
+/* ---- Admin forms --------------------------------------------------------- */
+.admin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    padding: 1.25rem;
+    max-width: 560px;
+}
+
+.admin-form .field {
+    font-size: 0.82rem;
+}
+
+.admin-form input,
+.admin-form select {
+    padding: 0.65rem 0.8rem;
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--ink);
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    outline: none;
+}
+
+.admin-form input:focus,
+.admin-form select:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+/* A checkbox + label sitting on one line. */
+.check-field {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.check-field input {
+    width: auto;
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+}
+
+.form-actions .btn {
+    width: auto;
+}
+
+/* A full-width message banner (errors in red, success in green). */
+.banner {
+    padding: 0.7rem 0.9rem;
+    border-radius: 9px;
+    font-size: 0.9rem;
+    display: none;             /* hidden until we put a message in it */
+}
+
+.banner.show {
+    display: block;
+}
+
+.banner.error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.banner.success {
+    background: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+/* A simple "loading…" / "no results" row inside a table body. */
+.state-row td {
+    text-align: center;
+    color: var(--muted);
+    padding: 1.5rem;
+}
+
+/* Definition list used on the detail page. */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem 1.5rem;
+    padding: 1.25rem;
+}
+
+.detail-grid dt {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+}
+
+.detail-grid dd {
+    margin-top: 0.2rem;
+    font-size: 1rem;
+    color: var(--ink);
+    word-break: break-word;
+}
+
+/* A list of permission codes rendered as small chips. */
+.perm-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+
+.perm-list span {
+    background: #f1f5f9;
+    color: var(--ink);
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* On narrow screens, stack the header/toolbar so nothing overflows. */
+@media (max-width: 640px) {
+    .page-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

@@ -1,0 +1,219 @@
+================================================================================
+IMPLEMENTATION PROMPT — REPORTS MODULE
+CRM System: FastAPI + PostgreSQL (Supabase) + Jinja2/HTML/CSS/JS + JWT + RBAC
+================================================================================
+
+ROLE
+You are a senior FastAPI engineer extending an existing, beginner-oriented CRM
+scaffold. Match the codebase style: layered architecture, thin permission-guarded
+routers, verbose explanatory comments. This is a READ-ONLY analytics/export
+module: it produces detailed, filterable reports from existing tables and can
+export them (CSV). It creates NO new business tables. Reuse get_current_user and
+require_permission(code).
+
+--------------------------------------------------------------------------------
+1. MODULE OVERVIEW
+--------------------------------------------------------------------------------
+Purpose:
+- Provide detailed, parameterized business reports (sales over time, sales by
+  customer, sales by product, order status breakdown, low-stock/inventory) with
+  filtering, grouping, and CSV export.
+
+Business objectives:
+- Let managers analyze performance across time, customers, and products.
+- Support decision-making with accurate, exportable figures.
+- Complement the Dashboard (headline KPIs) with drill-down detail and downloads.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCIES
+--------------------------------------------------------------------------------
+Existing modules required:
+- Authentication (get_current_user), RBAC require_permission(code).
+- Customers, Products, Orders modules (their tables provide the data).
+
+Existing database tables used (read-only):
+- `orders`, `order_items`, `customers`, `products`, `users`.
+
+New tables required:
+- NONE. (Reports are computed on demand via aggregate SQL.)
+
+--------------------------------------------------------------------------------
+3. DATABASE
+--------------------------------------------------------------------------------
+- No new tables. Use parameterized aggregate SQL (SUM, COUNT, AVG, GROUP BY,
+  date_trunc, JOINs across orders/order_items/customers/products).
+- Exclude 'cancelled' orders from revenue reports; define the revenue-status set
+  (paid, shipped, completed) once and reuse (share it with the Dashboard module).
+- Rely on existing indexes (orders.created_at, orders.status, orders.customer_id,
+  order_items.product_id). Add any missing index idempotently in the OWNING
+  module's SQL, not here.
+- Guard against unbounded scans: require or default a date range on time-series
+  reports; cap export row counts (e.g. 50k) or stream.
+
+--------------------------------------------------------------------------------
+4. BACKEND
+--------------------------------------------------------------------------------
+No SQLAlchemy models (read-only).
+
+Pydantic schemas (reports_schemas.py):
+- ReportFilter -> date_from?, date_to?, group_by? (day|week|month),
+                  status?, customer_id?, product_id?
+- SalesOverTimeRow  -> period, order_count, revenue (Decimal)
+- SalesByCustomerRow-> customer_id, customer_name, order_count, revenue
+- SalesByProductRow -> product_id, product_name, qty_sold, revenue
+- OrderStatusRow    -> status, order_count, revenue
+- InventoryRow      -> product_id, sku, name, stock_qty, is_active
+- ReportResponse[T] -> generated_at, filters_echo, columns, rows: list[T],
+                       totals (row of aggregates)
+
+Repository/Service (reports_service.py) — read-only:
+- sales_over_time(db, filter) -> list[SalesOverTimeRow]
+- sales_by_customer(db, filter, limit?) -> list[SalesByCustomerRow]
+- sales_by_product(db, filter, limit?) -> list[SalesByProductRow]
+- orders_by_status(db, filter) -> list[OrderStatusRow]
+- inventory_report(db, low_stock_only?, threshold=5) -> list[InventoryRow]
+- to_csv(rows, columns) -> streaming CSV (StreamingResponse, text/csv,
+  Content-Disposition attachment).
+- Validate/normalize date ranges (date_from <= date_to; sane defaults, e.g. last
+  90 days) and group_by enum.
+
+Routers (routers/reports.py, /api/reports): thin, permission-guarded. Each report
+has a JSON endpoint and an optional `?format=csv` (or `/export`) variant.
+
+Validation:
+- date_from <= date_to; group_by in {day,week,month}; status in allowed set;
+  customer_id/product_id must exist if provided.
+
+Error handling:
+- 401/403; 400 invalid filter (bad range, unknown group_by); 404 unknown
+  customer/product filter; 422 schema. Empty result -> empty rows + zero totals.
+
+--------------------------------------------------------------------------------
+5. REST APIs
+--------------------------------------------------------------------------------
+(1) Sales over time
+    URL: GET /api/reports/sales-over-time
+    Query: date_from, date_to, group_by (day|week|month), status?, format?(json|csv)
+    Response: ReportResponse[SalesOverTimeRow]  (or CSV attachment)
+    Permission: reports.view
+
+(2) Sales by customer
+    URL: GET /api/reports/sales-by-customer
+    Query: date_from, date_to, status?, limit?, format?
+    Response: ReportResponse[SalesByCustomerRow]
+    Permission: reports.view
+
+(3) Sales by product
+    URL: GET /api/reports/sales-by-product
+    Query: date_from, date_to, status?, limit?, format?
+    Response: ReportResponse[SalesByProductRow]
+    Permission: reports.view
+
+(4) Orders by status
+    URL: GET /api/reports/orders-by-status
+    Query: date_from, date_to, format?
+    Response: ReportResponse[OrderStatusRow]
+    Permission: reports.view
+
+(5) Inventory / low stock
+    URL: GET /api/reports/inventory
+    Query: low_stock_only?, threshold?, format?
+    Response: ReportResponse[InventoryRow]
+    Permission: reports.view
+
+(6) CSV export (per report)
+    URL: same endpoints with ?format=csv (or GET /api/reports/{name}/export)
+    Response: text/csv attachment (StreamingResponse)
+    Permission: reports.view
+
+--------------------------------------------------------------------------------
+6. BUSINESS RULES
+--------------------------------------------------------------------------------
+- Read-only: reports never mutate data.
+- Revenue counts only non-cancelled orders in the revenue-status set
+  (paid, shipped, completed); keep this definition identical to the Dashboard.
+- Time grouping uses date_trunc(group_by, created_at); default group_by=month.
+- Default date range when none supplied: last 90 days (documented); date_from
+  must be <= date_to.
+- Every report returns a totals row (sum of revenue, count, qty) matching the
+  detail rows for the same filters.
+- Sorting defaults: sales-over-time by period asc; by-customer/by-product by
+  revenue desc; inventory by stock_qty asc.
+- CSV export mirrors the on-screen columns and respects the same filters; large
+  exports are streamed and row-capped (e.g. 50k) to protect the server.
+- All monetary values are Decimal / NUMERIC(12,2); format currency consistently.
+- Reports are not owner-scoped in this scaffold (any user with reports.view sees
+  organization-wide figures).
+
+--------------------------------------------------------------------------------
+7. AUTHORIZATION
+--------------------------------------------------------------------------------
+Permission (already seeded in sql/rbac.sql):
+- reports.view — access and export every report in this module.
+All endpoints (JSON and CSV) guarded via require_permission("reports.view").
+(ADMIN, MANAGER, and SALES already hold reports.view per the RBAC seed.)
+
+--------------------------------------------------------------------------------
+8. FRONTEND
+--------------------------------------------------------------------------------
+Jinja2 shell + vanilla JS fetching the report endpoints with the Bearer token
+(auth.js pattern; redirect to /login when unauthenticated). Optional CNN tokens.
+
+This is a reporting module, so standard create/edit/detail CRUD pages do NOT
+apply. Instead:
+
+Reports landing page (/reports):
+- A left/top selector listing the available reports (Sales over time, Sales by
+  customer, Sales by product, Orders by status, Inventory).
+- A shared filter bar: date range (presets + custom), group_by (where relevant),
+  status, and customer/product pickers (where relevant).
+- Results area: a data table with a totals footer row and a small chart where it
+  helps (e.g. bar chart for sales-over-time). Keep charts lightweight/inline.
+- "Export CSV" button that downloads the current report with current filters.
+
+List/table behavior:
+- Search: not free-text; filtering is via the structured filter bar.
+- Filters: date range, group_by, status, customer, product (per report).
+- Pagination: for large detail reports, paginate the on-screen table (page +
+  page_size) while CSV export returns the full (capped) dataset.
+- Sorting: clickable column headers (revenue, count, qty, period).
+
+Responsive layout: filter bar stacks on mobile; tables scroll horizontally;
+charts scale to width.
+
+Validation: enforce date_from <= date_to in the UI; disable Export while loading;
+show empty-state and error messages; format dates and currency consistently.
+
+Permission-gating: the whole /reports area and its menu item are shown only to
+users with reports.view.
+
+--------------------------------------------------------------------------------
+9. NAVIGATION
+--------------------------------------------------------------------------------
+- Add "Reports" to the main CRM sidebar, visible only with reports.view.
+- Place it after the working modules (Customers/Products/Orders), near Dashboard
+  or in an "Insights" group with the Dashboard.
+- Active-state highlight on /reports* routes.
+
+--------------------------------------------------------------------------------
+10. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] All /api/reports endpoints are JWT-protected and require reports.view (403
+    otherwise).
+[ ] No new business tables; reports computed with aggregate SQL.
+[ ] Revenue excludes cancelled orders and uses the shared revenue-status set,
+    identical to the Dashboard's definition.
+[ ] Sales-over-time supports group_by day/week/month via date_trunc.
+[ ] Sales-by-customer and sales-by-product return correct qty/revenue, sorted by
+    revenue desc.
+[ ] Orders-by-status and inventory/low-stock reports work with filters.
+[ ] Every report returns a matching totals row.
+[ ] Invalid filters (date_from > date_to, bad group_by, unknown ids) return 400/
+    404/422 as appropriate; empty results return empty rows + zero totals.
+[ ] CSV export mirrors columns + filters, is streamed, and row-capped.
+[ ] All money is Decimal/NUMERIC(12,2); currency/dates formatted consistently.
+[ ] /reports page: report selector + filter bar + table (+ chart) + export work
+    end-to-end and are responsive.
+[ ] "Reports" menu item and page appear only for users with reports.view.
+[ ] Beginner-friendly comments consistent with the codebase.
+================================================================================

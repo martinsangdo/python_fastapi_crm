@@ -21,7 +21,7 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth
+from routers import auth, users
 from schemas import UserPublic
 
 # Create the application instance.
@@ -40,6 +40,9 @@ templates = Jinja2Templates(directory="templates")
 
 # Plug in all the /auth/* API routes defined in routers/auth.py.
 app.include_router(auth.router)
+
+# Plug in the Users administration API (/api/users, /api/roles, ...).
+app.include_router(users.router)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +89,46 @@ def dashboard_page(request: Request):
     """
     return templates.TemplateResponse(
         request, "dashboard.html", {"title": "Dashboard"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Users administration pages (HTML shells)
+# ---------------------------------------------------------------------------
+# These routes only SERVE the HTML. Just like /dashboard, each page's JavaScript
+# checks the login token in the browser and then calls the /api/users API (which
+# is where the real permission checks happen). Serving the shell to everyone is
+# safe because the API refuses any request that lacks the right permission.
+
+@app.get("/admin/users")
+def users_list_page(request: Request):
+    """The user list (table with search, filters, paging)."""
+    return templates.TemplateResponse(
+        request, "users/list.html", {"title": "Users"}
+    )
+
+
+@app.get("/admin/users/new")
+def users_create_page(request: Request):
+    """The create-user form."""
+    return templates.TemplateResponse(
+        request, "users/create.html", {"title": "New user"}
+    )
+
+
+@app.get("/admin/users/{user_id}")
+def users_detail_page(request: Request, user_id: str):
+    """The read-only detail view for one user."""
+    return templates.TemplateResponse(
+        request, "users/detail.html", {"title": "User detail", "user_id": user_id}
+    )
+
+
+@app.get("/admin/users/{user_id}/edit")
+def users_edit_page(request: Request, user_id: str):
+    """The edit form (name / role / active) plus a reset-password action."""
+    return templates.TemplateResponse(
+        request, "users/edit.html", {"title": "Edit user", "user_id": user_id}
     )
 
 

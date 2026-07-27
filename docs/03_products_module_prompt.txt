@@ -1,0 +1,215 @@
+================================================================================
+IMPLEMENTATION PROMPT — PRODUCTS MODULE (Product Catalog)
+CRM System: FastAPI + PostgreSQL (Supabase) + Jinja2/HTML/CSS/JS + JWT + RBAC
+================================================================================
+
+ROLE
+You are a senior FastAPI engineer extending an existing, beginner-oriented CRM
+scaffold. Match the codebase style: layered architecture (model -> schema ->
+repository -> service -> router), UUID primary keys, timezone-aware timestamps,
+thin routers translating service ValueErrors to HTTP, verbose explanatory
+comments. Reuse get_current_user and the shared require_permission(code)
+dependency (from the Users module prompt).
+
+--------------------------------------------------------------------------------
+1. MODULE OVERVIEW
+--------------------------------------------------------------------------------
+Purpose:
+- Maintain the catalog of products/services the business sells: name, SKU,
+  price, stock, and active status. Orders reference these products.
+
+Business objectives:
+- One authoritative product catalog with stable prices and identifiers (SKU).
+- Support order creation (price + availability lookups).
+- Enable simple stock tracking and active/inactive lifecycle.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCIES
+--------------------------------------------------------------------------------
+Existing modules required:
+- Authentication (get_current_user) and RBAC require_permission(code).
+
+Existing database tables used:
+- `users` (created_by attribution).
+
+New tables required:
+- `products` (NEW — this module owns it).
+
+--------------------------------------------------------------------------------
+3. DATABASE
+--------------------------------------------------------------------------------
+New table: products
+Columns:
+- id           UUID PK DEFAULT gen_random_uuid()
+- sku          VARCHAR(64)  NOT NULL UNIQUE      -- stock keeping unit
+- name         VARCHAR(255) NOT NULL
+- description  TEXT NULL
+- price        NUMERIC(12,2) NOT NULL DEFAULT 0  -- store money as NUMERIC, not float
+- currency     VARCHAR(3)   NOT NULL DEFAULT 'USD'  -- ISO 4217
+- stock_qty    INTEGER      NOT NULL DEFAULT 0
+- is_active    BOOLEAN      NOT NULL DEFAULT TRUE
+- created_by   UUID NULL REFERENCES users(id) ON DELETE SET NULL
+- created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+- updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+
+Relationships:
+- (Future) order_items.product_id -> products.id (defined by Orders module).
+
+Constraints:
+- sku UNIQUE + NOT NULL (normalize to uppercase, trimmed).
+- price >= 0 (CHECK and service validation); NUMERIC(12,2) — never float.
+- stock_qty >= 0 (CHECK and service validation).
+- currency is a 3-letter ISO code (default USD).
+
+Indexes:
+- ux_products_sku      UNIQUE on products(sku)
+- ix_products_name     on products(name)
+- ix_products_is_active on products(is_active)
+
+Provide idempotent, Supabase-safe sql/products.sql mirroring the model.
+
+--------------------------------------------------------------------------------
+4. BACKEND
+--------------------------------------------------------------------------------
+SQLAlchemy model (Product) registered on Base; use SQLAlchemy Numeric(12,2) for
+price and expose it as Decimal in Python.
+
+Pydantic schemas (use Decimal + condecimal/Field ge=0 for price):
+- ProductCreate  -> sku, name, description?, price (>=0), currency? (len 3),
+                    stock_qty? (>=0), is_active? (default True)
+- ProductUpdate  -> all optional
+- ProductListItem-> id, sku, name, price, currency, stock_qty, is_active
+- ProductDetail  -> all columns + created_by summary + timestamps
+- Paginated[ProductListItem]
+
+Repository (products_repository.py):
+- list_products(db, *, search, is_active, in_stock, min_price, max_price,
+                sort, order, page, page_size) -> (rows, total)
+- get_product(db, id) / get_by_sku(db, sku) / create / update / delete
+- adjust_stock(db, product, delta)  (used later by Orders)
+
+Service (products_service.py) — raises ValueError:
+- create_product(db, actor, data): normalize sku (upper+trim), enforce SKU
+  uniqueness, validate price>=0 and stock>=0, set created_by.
+- update_product(db, id, data): fetch-or-raise, re-check SKU uniqueness if SKU
+  changed, validate numeric bounds.
+- delete_product(db, id): block if referenced by any order item (see §6).
+- deactivate/activate helpers.
+
+Routers (routers/products.py, /api/products): thin, permission-guarded.
+
+Validation: SKU unique/non-empty; price>=0; stock_qty>=0; currency length 3.
+
+Error handling: 401/403/404; 409 duplicate SKU or delete-blocked-by-orders;
+400 invalid numeric; 422 schema.
+
+--------------------------------------------------------------------------------
+5. REST APIs
+--------------------------------------------------------------------------------
+(1) List products
+    URL: GET /api/products
+    Query: search (name|sku), is_active, in_stock, min_price, max_price,
+           sort (name|price|stock_qty|created_at), order, page, page_size
+    Response: Paginated[ProductListItem]
+    Permission: products.read
+
+(2) Get product
+    URL: GET /api/products/{id}
+    Response: ProductDetail
+    Permission: products.read
+
+(3) Create product
+    URL: POST /api/products
+    Body: ProductCreate
+    Response: ProductDetail (201)
+    Permission: products.create
+
+(4) Update product
+    URL: PATCH /api/products/{id}
+    Body: ProductUpdate
+    Response: ProductDetail
+    Permission: products.update
+
+(5) Delete product
+    URL: DELETE /api/products/{id}
+    Response: 204 (or 409 if referenced by orders)
+    Permission: products.delete
+
+(6) Activate / Deactivate
+    URL: POST /api/products/{id}/activate | /deactivate
+    Response: ProductDetail
+    Permission: products.update
+
+--------------------------------------------------------------------------------
+6. BUSINESS RULES
+--------------------------------------------------------------------------------
+- SKU is unique, uppercase, trimmed, required; changing it re-checks uniqueness.
+- Money is NUMERIC(12,2) / Decimal end-to-end; never floats. price >= 0.
+- stock_qty >= 0 at all times; Orders decrement it and must not push it below 0.
+- Only is_active products may be added to NEW orders (enforced in Orders module).
+- Deletion guard: a product referenced by any order item cannot be hard-deleted
+  (409); deactivate it instead to preserve order history.
+- Deactivating a product hides it from new-order product pickers but keeps it in
+  historical orders.
+
+--------------------------------------------------------------------------------
+7. AUTHORIZATION
+--------------------------------------------------------------------------------
+Permissions (already seeded in sql/rbac.sql):
+- products.read   — list + detail
+- products.create — create
+- products.update — edit, activate/deactivate
+- products.delete — delete
+Guarded via require_permission(code).
+
+--------------------------------------------------------------------------------
+8. FRONTEND
+--------------------------------------------------------------------------------
+Jinja2 shells + vanilla JS + Bearer token (auth.js pattern). Optional CNN tokens.
+
+List page (/products): table SKU, Name, Price (formatted with currency), Stock,
+Status badge. Row actions View/Edit/Activate-Deactivate/Delete. "New product"
+button gated by products.create. Low-stock rows visually flagged.
+
+Create page (/products/new): sku, name, description, price, currency, stock_qty,
+is_active. Client-side price/stock numeric validation.
+
+Edit page (/products/{id}/edit): same fields pre-filled.
+
+Detail page (/products/{id}): read-only catalog view; action buttons gated.
+
+Search: name OR SKU (case-insensitive, partial).
+
+Filters: status (active/inactive), in-stock toggle, price range (min/max).
+
+Pagination: page + page_size (default 20) with totals.
+
+Sorting: name, price, stock_qty, created_at.
+
+Responsive: table -> stacked cards on mobile.
+
+Validation: required SKU/name; price>=0; stock>=0; duplicate-SKU error surfaced
+inline; format prices consistently in the UI.
+
+--------------------------------------------------------------------------------
+9. NAVIGATION
+--------------------------------------------------------------------------------
+- Add "Products" to the main sidebar, visible only with products.read.
+- Group with Customers and Orders in the working section.
+- Active-state highlight on /products* routes.
+
+--------------------------------------------------------------------------------
+10. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] products table created via model + idempotent sql/products.sql.
+[ ] CRUD + activate/deactivate endpoints under /api/products, JWT-protected.
+[ ] Correct products.* permission enforced per endpoint (403 otherwise).
+[ ] SKU is unique, uppercased, trimmed; duplicate SKU returns 409.
+[ ] price stored as NUMERIC(12,2)/Decimal; price>=0 and stock_qty>=0 enforced.
+[ ] List supports search, active filter, in-stock, price range, sort, pagination.
+[ ] Deleting a product referenced by orders is blocked with 409.
+[ ] Deactivated products excluded from new-order pickers but kept in history.
+[ ] Frontend list/create/edit/detail pages work end-to-end; prices formatted.
+[ ] "Products" menu item appears only with products.read.
+[ ] Beginner-friendly comments consistent with the codebase.
+================================================================================

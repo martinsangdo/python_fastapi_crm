@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/admin/users" class="active">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1 id="page-title">User detail</h1>
+            <div class="row-actions">
+                <a href="/admin/users" class="btn small secondary">Back to list</a>
+                <!-- Edit button is shown only if the viewer has users.update. -->
+                <a id="edit-btn" href="#" class="btn small" style="display:none">Edit</a>
+            </div>
+        </div>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="panel">
+            <dl id="detail" class="detail-grid">
+                <div class="state-row"><dd>Loading…</dd></div>
+            </dl>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/users.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const userId = "{{ user_id }}";
+        const detailEl = document.getElementById("detail");
+        const banner = document.getElementById("banner");
+
+        function field(label, valueHtml) {
+            return `<div><dt>${Users.escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+        }
+
+        async function loadUser() {
+            let myPermissions = new Set();
+            try {
+                myPermissions = await Users.fetchMyPermissions();
+
+                const response = await Auth.apiFetch(`/api/users/${userId}`);
+                if (!response.ok) {
+                    const msg = await Users.errorMessage(response, "Could not load the user.");
+                    Users.showBanner(banner, msg, "error");
+                    detailEl.innerHTML = "";
+                    return;
+                }
+                const user = await response.json();
+
+                document.getElementById("page-title").textContent = user.full_name;
+
+                const statusHtml = user.is_active
+                    ? '<span class="badge active">Active</span>'
+                    : '<span class="badge inactive">Inactive</span>';
+                const roleHtml = user.role
+                    ? `<span class="badge role">${Users.escapeHtml(user.role.name)}</span> `
+                      + `<span style="color:var(--muted)">(${Users.escapeHtml(user.role.code)})</span>`
+                    : '<span class="badge inactive">No role</span>';
+
+                const permsHtml = user.permissions.length
+                    ? `<div class="perm-list">${user.permissions
+                        .map((p) => `<span>${Users.escapeHtml(p)}</span>`).join("")}</div>`
+                    : '<span style="color:var(--muted)">None</span>';
+
+                detailEl.innerHTML = [
+                    field("Full name", Users.escapeHtml(user.full_name)),
+                    field("Email", Users.escapeHtml(user.email)),
+                    field("Status", statusHtml),
+                    field("Role", roleHtml),
+                    field("Last login", Users.formatDate(user.last_login)),
+                    field("Created", Users.formatDate(user.created_at)),
+                    field("Updated", Users.formatDate(user.updated_at)),
+                    field("Effective permissions", permsHtml),
+                ].join("");
+
+                // Show the Edit button only to users who can update.
+                if (myPermissions.has("users.update")) {
+                    const editBtn = document.getElementById("edit-btn");
+                    editBtn.href = `/admin/users/${userId}/edit`;
+                    editBtn.style.display = "";
+                }
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        loadUser();
+    </script>
+</body>
+</html>

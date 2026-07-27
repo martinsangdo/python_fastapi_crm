@@ -1,0 +1,235 @@
+================================================================================
+IMPLEMENTATION PROMPT — CUSTOMERS MODULE
+CRM System: FastAPI + PostgreSQL (Supabase) + Jinja2/HTML/CSS/JS + JWT + RBAC
+================================================================================
+
+ROLE
+You are a senior FastAPI engineer extending an existing, beginner-oriented CRM
+scaffold. Match the codebase style: layered architecture (model -> schema ->
+repository -> service -> router), UUID primary keys, timezone-aware timestamps
+with server_default now() and onupdate, thin routers that translate service
+ValueErrors into HTTP responses, and verbose explanatory comments. Reuse the
+existing auth (get_current_user) and the shared require_permission(code)
+dependency (build it if the Users module has not already — see its prompt).
+
+--------------------------------------------------------------------------------
+1. MODULE OVERVIEW
+--------------------------------------------------------------------------------
+Purpose:
+- Manage the CRM's customers (companies and/or individuals): create, view,
+  update, search, and remove customer records that other modules (Orders,
+  Reports, Dashboard) build on.
+
+Business objectives:
+- Maintain a single, trustworthy customer directory.
+- Enable sales staff to quickly find and update customer details.
+- Serve as the foundation for orders and revenue reporting.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCIES
+--------------------------------------------------------------------------------
+Existing modules required:
+- Authentication (dependencies.get_current_user).
+- RBAC + require_permission(code) shared dependency.
+
+Existing database tables used:
+- `users` (for created_by / owner attribution and auth).
+
+New tables required:
+- `customers` (NEW — this module owns it).
+
+--------------------------------------------------------------------------------
+3. DATABASE
+--------------------------------------------------------------------------------
+New table: customers
+Columns:
+- id            UUID  PK  DEFAULT gen_random_uuid()
+- name          VARCHAR(255) NOT NULL           -- company or full contact name
+- email         VARCHAR(255) NULL               -- primary contact email
+- phone         VARCHAR(50)  NULL
+- company       VARCHAR(255) NULL
+- status        VARCHAR(20)  NOT NULL DEFAULT 'active'  -- active|inactive|lead
+- address_line  VARCHAR(255) NULL
+- city          VARCHAR(120) NULL
+- country       VARCHAR(120) NULL
+- notes         TEXT NULL
+- owner_id      UUID NULL REFERENCES users(id) ON DELETE SET NULL  -- sales owner
+- created_by    UUID NULL REFERENCES users(id) ON DELETE SET NULL
+- created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+- updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+
+Relationships:
+- customers.owner_id   -> users.id (many customers to one owner)
+- customers.created_by -> users.id
+- (Future) orders.customer_id -> customers.id (defined by the Orders module).
+
+Constraints:
+- name NOT NULL and non-empty (trim before save).
+- status limited to {active, inactive, lead} — enforce in service layer and/or
+  a CHECK constraint.
+- email, if provided, must be a valid email (Pydantic EmailStr) and is stored
+  lowercased. (No global UNIQUE on email — duplicates across leads are allowed;
+  warn on exact duplicate optionally.)
+
+Indexes:
+- ix_customers_name    on customers(name)
+- ix_customers_status  on customers(status)
+- ix_customers_owner   on customers(owner_id)
+- ix_customers_created_at on customers(created_at)
+
+Provide an idempotent, Supabase-safe migration in sql/customers.sql
+(CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE IF NOT EXISTS ...;
+CREATE INDEX IF NOT EXISTS ...) mirroring the SQLAlchemy model. app.py already
+calls Base.metadata.create_all, so importing the model auto-creates the table in
+dev; the SQL file is documentation/manual-setup parity.
+
+--------------------------------------------------------------------------------
+4. BACKEND
+--------------------------------------------------------------------------------
+SQLAlchemy model (models.py or customers_model.py): Customer as described above,
+registered on Base. Beginner-friendly per-column comments.
+
+Pydantic schemas:
+- CustomerCreate  -> name (1..255), email? (EmailStr), phone?, company?,
+                     status? (enum, default 'active'), address_line?, city?,
+                     country?, notes?, owner_id? (UUID)
+- CustomerUpdate  -> all fields optional (partial update)
+- CustomerListItem-> id, name, company, email, phone, status, owner_id, created_at
+- CustomerDetail  -> all columns + owner summary (id, full_name)
+- Paginated[CustomerListItem]
+
+Repository (customers_repository.py):
+- list_customers(db, *, search, status, owner_id, sort, order, page, page_size)
+  -> (rows, total)
+- get_customer(db, id) / create / update / delete
+- exists_email(db, email) (optional duplicate hinting)
+
+Service (customers_service.py) — HTTP-agnostic, raises ValueError:
+- create_customer(db, actor, data): trim name, normalize email, validate status,
+  set created_by=actor.id, default owner_id to actor if none.
+- update_customer(db, id, data): fetch-or-raise, validate status, apply changes.
+- delete_customer(db, id): block if the customer has orders (see §6) unless
+  Orders module not present; otherwise raise ValueError.
+- get_customer / list_customers pass-throughs with validation.
+
+Routers (routers/customers.py, /api/customers): thin, guarded by
+require_permission, map ValueError -> 404/400/409 as appropriate.
+
+Validation:
+- name required & non-empty; status in allowed set; email format via EmailStr;
+  owner_id (if given) must reference an existing active user.
+
+Error handling:
+- 401 unauth, 403 missing perm, 404 not found, 400 business rule / bad status,
+  409 conflict (e.g. delete blocked by dependent orders), 422 schema.
+
+--------------------------------------------------------------------------------
+5. REST APIs
+--------------------------------------------------------------------------------
+(1) List customers
+    URL: GET /api/customers
+    Query: search, status, owner_id, sort (name|created_at|status),
+           order (asc|desc), page, page_size
+    Response: Paginated[CustomerListItem]
+    Permission: customers.read
+
+(2) Get customer
+    URL: GET /api/customers/{id}
+    Response: CustomerDetail
+    Permission: customers.read
+
+(3) Create customer
+    URL: POST /api/customers
+    Body: CustomerCreate
+    Response: CustomerDetail (201)
+    Permission: customers.create
+
+(4) Update customer
+    URL: PATCH /api/customers/{id}
+    Body: CustomerUpdate
+    Response: CustomerDetail
+    Permission: customers.update
+
+(5) Delete customer
+    URL: DELETE /api/customers/{id}
+    Response: 204 (or 409 if it has orders)
+    Permission: customers.delete
+
+--------------------------------------------------------------------------------
+6. BUSINESS RULES
+--------------------------------------------------------------------------------
+- name is mandatory and trimmed; empty/whitespace-only names are rejected.
+- status is one of active | inactive | lead; defaults to active on create.
+- email, when present, is normalized to lowercase; format validated.
+- Every customer records created_by (the actor) and an owner_id (defaults to the
+  creating user; Admin/Manager may reassign owner via update).
+- Deletion guard: a customer that has one or more orders cannot be hard-deleted
+  (409). Recommend setting status='inactive' instead. (If Orders module is not
+  yet implemented, deletion is allowed.)
+- Reads are permission-gated but not owner-scoped in this scaffold (all readers
+  with customers.read see all customers). Owner scoping can be a later rule.
+
+--------------------------------------------------------------------------------
+7. AUTHORIZATION
+--------------------------------------------------------------------------------
+Permissions (already seeded in sql/rbac.sql):
+- customers.read   — list + detail
+- customers.create — create
+- customers.update — edit
+- customers.delete — delete
+All endpoints guarded via require_permission(code).
+
+--------------------------------------------------------------------------------
+8. FRONTEND
+--------------------------------------------------------------------------------
+Jinja2 shells + vanilla JS calling the JSON API with the Bearer token (auth.js
+pattern; redirect to /login when unauthenticated). Optional CNN design tokens.
+
+List page (/customers): table of Name, Company, Email, Phone, Status badge,
+Owner, Created. Row actions View/Edit/Delete. "New customer" button gated by
+customers.create.
+
+Create page (/customers/new): form with name, email, phone, company, status,
+address_line, city, country, notes, owner (dropdown, Admin/Manager only).
+
+Edit page (/customers/{id}/edit): same fields, pre-filled; owner editable only
+with customers.update.
+
+Detail page (/customers/{id}): read-only profile + (future) related orders
+section; action buttons gated by permissions.
+
+Search: single box matching name OR company OR email (case-insensitive, partial).
+
+Filters: status (all/active/inactive/lead), owner.
+
+Pagination: page + page_size (default 20) with totals.
+
+Sorting: clickable headers name, status, created_at.
+
+Responsive: table -> stacked cards on mobile; actions in overflow menu.
+
+Validation: inline errors; required name; email format; disable submit while
+pending; surface API 4xx (e.g. delete-blocked-by-orders) as a banner.
+
+--------------------------------------------------------------------------------
+9. NAVIGATION
+--------------------------------------------------------------------------------
+- Add "Customers" to the main CRM sidebar, visible only with customers.read.
+- Place it in the primary working group (Customers, Products, Orders).
+- Active-state highlight on /customers* routes.
+
+--------------------------------------------------------------------------------
+10. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] customers table created via model + idempotent sql/customers.sql.
+[ ] CRUD endpoints exist under /api/customers, each JWT-protected.
+[ ] Each endpoint enforces the correct customers.* permission (403 otherwise).
+[ ] List supports search, status filter, owner filter, sort, pagination.
+[ ] Create trims name, rejects empty name, validates status + email.
+[ ] created_by and owner_id are set correctly on create.
+[ ] Deleting a customer with orders is blocked with 409 (when Orders exists).
+[ ] Detail includes owner summary.
+[ ] Frontend list/create/edit/detail pages function end-to-end.
+[ ] "Customers" menu item appears only with customers.read.
+[ ] Code and comments match the beginner-friendly house style.
+================================================================================

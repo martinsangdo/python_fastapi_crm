@@ -1,0 +1,283 @@
+================================================================================
+IMPLEMENTATION PROMPT — USERS MODULE (User & Access Administration)
+CRM System: FastAPI + PostgreSQL (Supabase) + Jinja2/HTML/CSS/JS + JWT + RBAC
+================================================================================
+
+ROLE
+You are a senior FastAPI engineer extending an existing, beginner-oriented CRM
+scaffold. Match the codebase's existing style: layered architecture, UUID
+primary keys, timezone-aware timestamps, thin routers that translate service
+ValueErrors into HTTP responses, and verbose, explanatory comments aimed at a
+learning audience. Do NOT redesign existing tables. Reuse the existing auth
+building blocks (security.py, dependencies.py, auth_service.py, models.py).
+
+--------------------------------------------------------------------------------
+1. MODULE OVERVIEW
+--------------------------------------------------------------------------------
+Purpose:
+- Provide administrators a full management surface for the people who can log in
+  to the CRM (the `users` table) and the roles they are assigned.
+- This module turns the existing authentication + RBAC data into a usable admin
+  screen: create users, deactivate them, reset roles, and browse who has access.
+
+Business objectives:
+- Give Admins control over who can access the CRM and at what permission level.
+- Enforce least privilege by attaching exactly one role per user.
+- Keep an auditable, filterable list of accounts (active/inactive, by role).
+- Never expose password hashes; never allow privilege escalation by non-admins.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCIES
+--------------------------------------------------------------------------------
+Existing modules required:
+- Authentication module (security.py, auth_service.py, dependencies.py) — for
+  password hashing (`hash_password`) and `get_current_user`.
+- RBAC data model (models.py: User, Role, Permission, role_permissions).
+
+Existing database tables used (DO NOT recreate or alter their columns):
+- `users`             (id, email, password_hash, full_name, is_active,
+                       created_at, updated_at, last_login, role_id)
+- `roles`             (id, code, name, description, is_system, timestamps)
+- `permissions`       (id, module, action, code, description, created_at)
+- `role_permissions`  (role_id, permission_id)
+
+New tables required:
+- NONE. All required tables already exist (see sql/rbac.sql, sql/users.sql).
+
+SHARED PREREQUISITE (build this FIRST — every later module depends on it):
+- Create an authorization dependency `require_permission(code: str)` (suggested
+  file: `authorization.py`). It must:
+    * depend on `get_current_user`,
+    * load the user's role and that role's permission codes
+      (user -> role -> permissions.code),
+    * raise HTTP 403 if the required `code` is not present,
+    * return the current user on success.
+  Usage in routers: `user = Depends(require_permission("users.read"))`.
+- Add a helper `get_user_permission_codes(db, user) -> set[str]` in the service
+  or authorization layer.
+
+--------------------------------------------------------------------------------
+3. DATABASE
+--------------------------------------------------------------------------------
+New tables: none.
+
+Relationships (already defined, restated for clarity):
+- users.role_id -> roles.id  (many users to one role, ON DELETE SET NULL)
+- roles <-> permissions       (many-to-many via role_permissions)
+
+Constraints already in place (rely on them, do not duplicate):
+- users.email UNIQUE + NOT NULL
+- password_hash NOT NULL; full_name NOT NULL; is_active NOT NULL DEFAULT TRUE
+
+Indexes already in place:
+- ix_users_email on users(email)
+- ix_users_role_id on users(role_id)
+
+No migration file is required for this module. If any is generated, it must be
+idempotent (IF NOT EXISTS / ON CONFLICT) and Supabase-safe, and must NOT touch
+existing columns.
+
+--------------------------------------------------------------------------------
+4. BACKEND
+--------------------------------------------------------------------------------
+SQLAlchemy models:
+- Reuse existing User, Role, Permission models. No new models.
+
+Pydantic schemas (add to schemas.py or a users_schemas.py):
+- RoleSummary        -> id, code, name
+- UserAdminCreate    -> email (EmailStr), full_name (1..255), password (8..128),
+                        role_id (UUID | None), is_active (bool, default True)
+- UserAdminUpdate    -> full_name?, role_id? (UUID | None), is_active? (all optional)
+- UserAdminPasswordReset -> new_password (8..128)
+- UserAdminDetail    -> id, email, full_name, is_active, created_at, updated_at,
+                        last_login, role (RoleSummary | None), permissions (list[str])
+- UserListItem       -> id, email, full_name, is_active, role (RoleSummary | None),
+                        last_login, created_at
+- Paginated[UserListItem] -> items, total, page, page_size, total_pages
+  (Reuse from_attributes=True config; NEVER include password_hash.)
+
+Repository layer (users_repository.py):
+- list_users(db, *, search, role_id, is_active, sort, order, page, page_size)
+  -> (rows, total)
+- get_user(db, user_id)
+- get_user_by_email(db, email)   (may reuse auth_service.get_user_by_email)
+- create_user(db, ...) / update_user(db, user, changes) / set_active / set_role
+- reset_password(db, user, new_hash)
+- soft/hard delete per business rule (see §6)
+- list_roles(db)  (for the role dropdown)
+
+Service layer (users_service.py) — HTTP-agnostic, raises ValueError:
+- create_user_admin(db, data): normalize+validate email uniqueness, validate
+  role_id exists if provided, hash password, persist.
+- update_user_admin(db, actor, user_id, data): apply allowed changes, guard
+  self-deactivation and last-admin rule.
+- reset_user_password(db, user_id, new_password).
+- deactivate/activate_user(db, actor, user_id).
+- delete_user(db, actor, user_id).
+- Validation of role existence and "last active admin" invariant lives here.
+
+FastAPI routers (routers/users.py, prefix="/users" for API — see note):
+- Keep thin: call service, map ValueError -> HTTPException (409 conflict, 404
+  not found, 400 bad request, 422 handled by Pydantic), guard with
+  require_permission(...).
+- NOTE: The HTML page routes live under /admin/users; JSON API routes under
+  /api/users to avoid clashing with page routes. Pick one convention and apply
+  it consistently across all modules.
+
+Validation:
+- Email normalized (lower+strip); reject duplicates with a clear message.
+- Password min length 8 (matches existing auth rules).
+- role_id, if present, must reference an existing role.
+
+Error handling (consistent mapping across the module):
+- 401 no/invalid token, 403 missing permission, 404 user not found,
+  409 email already exists, 400 business-rule violation, 422 schema validation.
+
+--------------------------------------------------------------------------------
+5. REST APIs
+--------------------------------------------------------------------------------
+(1) List users
+    URL: GET /api/users
+    Query: search, role_id, is_active, sort (created_at|email|full_name|last_login),
+           order (asc|desc), page, page_size
+    Description: Paginated, filterable, sortable list.
+    Response: Paginated[UserListItem]
+    Permission: users.read
+
+(2) Get user detail
+    URL: GET /api/users/{user_id}
+    Response: UserAdminDetail (includes role + effective permission codes)
+    Permission: users.read
+
+(3) Create user
+    URL: POST /api/users
+    Body: UserAdminCreate
+    Response: UserAdminDetail (201)
+    Permission: users.create
+
+(4) Update user
+    URL: PATCH /api/users/{user_id}
+    Body: UserAdminUpdate
+    Response: UserAdminDetail
+    Permission: users.update
+
+(5) Reset password
+    URL: POST /api/users/{user_id}/reset-password
+    Body: UserAdminPasswordReset
+    Response: { "detail": "Password reset." }
+    Permission: users.update
+
+(6) Activate / Deactivate
+    URL: POST /api/users/{user_id}/activate  and  /deactivate
+    Response: UserAdminDetail
+    Permission: users.update
+
+(7) Delete user
+    URL: DELETE /api/users/{user_id}
+    Response: 204 No Content (or 200 with detail)
+    Permission: users.delete
+
+(8) List roles (for dropdowns)
+    URL: GET /api/roles
+    Response: list[RoleSummary]
+    Permission: users.read
+
+--------------------------------------------------------------------------------
+6. BUSINESS RULES
+--------------------------------------------------------------------------------
+- Exactly one role per user (role_id nullable; a user may temporarily have none).
+- Email is unique and case-insensitive; store normalized lowercase.
+- Passwords are stored only as bcrypt hashes via hash_password(); plain text is
+  never stored, logged, or returned.
+- Self-protection: a user cannot deactivate or delete their own account.
+- Last-admin protection: the system must always retain at least one ACTIVE user
+  with the ADMIN role. Block deactivation/deletion/role-change that would remove
+  the final active admin (raise ValueError -> 400).
+- Deactivation vs deletion: prefer deactivation (is_active=False) for audit
+  history; deletion is a hard delete and requires users.delete. Deleting a user
+  does NOT delete their role.
+- Deactivated users cannot log in (already enforced in get_current_user).
+- Only users with users.update may change another user's role (no self role
+  escalation via this module).
+- Detail response exposes effective permissions (role -> permissions) read-only;
+  editing permissions/roles-to-permissions is out of scope for this module.
+
+--------------------------------------------------------------------------------
+7. AUTHORIZATION
+--------------------------------------------------------------------------------
+Permissions required by this module (all already seeded in sql/rbac.sql):
+- users.read    — view user list and detail, list roles
+- users.create  — create users
+- users.update  — edit users, reset password, activate/deactivate, set role
+- users.delete  — delete users
+Enforced via the shared require_permission(code) dependency on every endpoint.
+
+--------------------------------------------------------------------------------
+8. FRONTEND
+--------------------------------------------------------------------------------
+Stack: Jinja2 server-rendered shells + plain HTML/CSS + vanilla JS that calls the
+JSON API with the Bearer token (follow the existing static/auth.js pattern:
+token stored client-side, redirect to /login when missing/expired). Optionally
+follow the CNN design system tokens (near-black ink on white, red reserved for
+accents, 8px grid, square blocks).
+
+List page (/admin/users):
+- Table columns: Full name, Email, Role, Status (Active/Inactive badge),
+  Last login, Created. Row actions: View, Edit, Activate/Deactivate, Delete.
+- "New user" button (visible only if users.create in the current user's perms).
+
+Create page (/admin/users/new):
+- Fields: full_name, email, password, role (dropdown from GET /api/roles),
+  is_active toggle. Client + server validation.
+
+Edit page (/admin/users/{id}/edit):
+- Edit full_name, role, is_active. Separate "Reset password" action.
+- Email shown read-only (changing login email is out of scope).
+
+Detail page (/admin/users/{id}):
+- Read-only profile: identity, role, effective permissions list, timestamps,
+  last login. Action buttons gated by the viewer's permissions.
+
+Search: single search box matching email OR full_name (case-insensitive, partial).
+
+Filters: role (dropdown), status (all/active/inactive).
+
+Pagination: page + page_size (default 20), show total and page controls.
+
+Sorting: clickable headers for full_name, email, last_login, created_at (asc/desc).
+
+Responsive layout: table collapses to stacked cards on small screens; actions in
+an overflow menu on mobile.
+
+Validation: inline field errors, disable submit while pending, surface API 4xx
+messages (duplicate email, last-admin rule) near the relevant field or as a banner.
+
+UI permission-gating: hide/disable create/edit/delete controls when the logged-in
+user lacks the matching permission (defense in depth — server still enforces).
+
+--------------------------------------------------------------------------------
+9. NAVIGATION
+--------------------------------------------------------------------------------
+- Add a "Users" (or "Access / Administration") item to the main CRM sidebar/menu.
+- Show the item only when the current user has users.read.
+- Group it under an "Administration" section alongside future Roles/Settings.
+- Highlight active state when on any /admin/users* route.
+
+--------------------------------------------------------------------------------
+10. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] require_permission(code) dependency exists and returns 403 on missing perm.
+[ ] All /api/users endpoints require a valid JWT (401 without one).
+[ ] List endpoint supports search, role filter, status filter, sort, pagination.
+[ ] Create rejects duplicate emails (409) and weak passwords (<8 chars, 422).
+[ ] Passwords stored as bcrypt hashes; no endpoint ever returns password_hash.
+[ ] Update can change name, role, and active status; email is not editable here.
+[ ] Reset-password sets a new bcrypt hash and does not reveal the old one.
+[ ] A user cannot deactivate or delete themselves (400).
+[ ] The last active ADMIN cannot be deactivated, deleted, or role-changed (400).
+[ ] Detail returns role + effective permission codes.
+[ ] Frontend list/create/edit/detail pages work end-to-end against the API.
+[ ] UI hides create/edit/delete controls when the viewer lacks the permission.
+[ ] "Users" menu item appears only for users with users.read.
+[ ] Comments are beginner-friendly and consistent with the existing codebase.
+================================================================================

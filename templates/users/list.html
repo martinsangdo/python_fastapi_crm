@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <!-- Shared header bar. The "Users" link is marked active. -->
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/admin/users" class="active">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Users</h1>
+            <!-- Hidden until we confirm the viewer has users.create. -->
+            <a id="new-user-btn" href="/admin/users/new" class="btn small" style="display:none">
+                + New user
+            </a>
+        </div>
+
+        <div class="panel">
+            <!-- Search + filters. Changing any of them reloads the table. -->
+            <div class="toolbar">
+                <label class="field">
+                    <span>Search</span>
+                    <input id="f-search" type="text" placeholder="Name or email…" />
+                </label>
+                <label class="field">
+                    <span>Role</span>
+                    <select id="f-role">
+                        <option value="">All roles</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Status</span>
+                    <select id="f-status">
+                        <option value="">All</option>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="full_name">Name</th>
+                            <th class="sortable" data-sort="email">Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th class="sortable" data-sort="last_login">Last login</th>
+                            <th class="sortable" data-sort="created_at">Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows">
+                        <tr class="state-row"><td colspan="7">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Paging controls. -->
+            <div class="pagination">
+                <span id="page-info">—</span>
+                <div class="pages">
+                    <button id="prev-btn" class="btn small secondary" disabled>Previous</button>
+                    <button id="next-btn" class="btn small secondary" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/users.js"></script>
+    <script>
+        // Guard: no token -> straight to /login.
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        // The current query state. Everything the table shows derives from this.
+        const state = {
+            search: "",
+            role_id: "",
+            is_active: "",
+            sort: "created_at",
+            order: "desc",
+            page: 1,
+            page_size: 20,
+        };
+
+        let myPermissions = new Set();   // the viewer's own permission codes
+        let myUserId = null;             // so we can avoid self-destructive buttons
+
+        const rowsEl = document.getElementById("rows");
+        const pageInfoEl = document.getElementById("page-info");
+
+        // Build the query string from the current state (skipping empty values).
+        function buildQuery() {
+            const params = new URLSearchParams();
+            if (state.search) params.set("search", state.search);
+            if (state.role_id) params.set("role_id", state.role_id);
+            if (state.is_active !== "") params.set("is_active", state.is_active);
+            params.set("sort", state.sort);
+            params.set("order", state.order);
+            params.set("page", state.page);
+            params.set("page_size", state.page_size);
+            return params.toString();
+        }
+
+        // Draw one <tr> for a user, gating the action buttons by permission.
+        function renderRow(user) {
+            const roleHtml = user.role
+                ? `<span class="badge role">${Users.escapeHtml(user.role.name)}</span>`
+                : '<span class="badge inactive">No role</span>';
+
+            const statusHtml = user.is_active
+                ? '<span class="badge active">Active</span>'
+                : '<span class="badge inactive">Inactive</span>';
+
+            // Row actions: View is always available (needs users.read, which the
+            // page already required). Edit/toggle need users.update; delete needs
+            // users.delete. We also skip self-destructive actions on your own row.
+            const actions = [];
+            actions.push(`<a href="/admin/users/${user.id}">View</a>`);
+
+            if (myPermissions.has("users.update")) {
+                actions.push(`<a href="/admin/users/${user.id}/edit">Edit</a>`);
+                if (user.id !== myUserId) {
+                    if (user.is_active) {
+                        actions.push(`<button data-action="deactivate" data-id="${user.id}">Deactivate</button>`);
+                    } else {
+                        actions.push(`<button data-action="activate" data-id="${user.id}">Activate</button>`);
+                    }
+                }
+            }
+            if (myPermissions.has("users.delete") && user.id !== myUserId) {
+                actions.push(`<button class="danger" data-action="delete" data-id="${user.id}" data-name="${Users.escapeHtml(user.full_name)}">Delete</button>`);
+            }
+
+            return `<tr>
+                <td>${Users.escapeHtml(user.full_name)}</td>
+                <td>${Users.escapeHtml(user.email)}</td>
+                <td>${roleHtml}</td>
+                <td>${statusHtml}</td>
+                <td>${Users.formatDate(user.last_login)}</td>
+                <td>${Users.formatDate(user.created_at)}</td>
+                <td><div class="row-actions">${actions.join("")}</div></td>
+            </tr>`;
+        }
+
+        // Fetch a page of users and paint the table.
+        async function loadUsers() {
+            rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">Loading…</td></tr>';
+            try {
+                const response = await Auth.apiFetch(`/api/users?${buildQuery()}`);
+                if (!response.ok) {
+                    const msg = await Users.errorMessage(response, "Could not load users.");
+                    rowsEl.innerHTML = `<tr class="state-row"><td colspan="7">${Users.escapeHtml(msg)}</td></tr>`;
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">No users match your filters.</td></tr>';
+                } else {
+                    rowsEl.innerHTML = data.items.map(renderRow).join("");
+                }
+
+                // Update the pager.
+                const shownPages = data.total_pages || 1;
+                pageInfoEl.textContent =
+                    `Page ${data.page} of ${shownPages} · ${data.total} user(s)`;
+                document.getElementById("prev-btn").disabled = data.page <= 1;
+                document.getElementById("next-btn").disabled = data.page >= shownPages;
+            } catch (err) {
+                // apiFetch handles the 401 redirect; anything else shows here.
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">Could not load users.</td></tr>';
+            }
+        }
+
+        // Fill the role filter dropdown from GET /api/roles.
+        async function loadRoles() {
+            try {
+                const response = await Auth.apiFetch("/api/roles");
+                if (!response.ok) return;
+                const roles = await response.json();
+                const select = document.getElementById("f-role");
+                for (const role of roles) {
+                    const opt = document.createElement("option");
+                    opt.value = role.id;
+                    opt.textContent = role.name;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "All roles" only */ }
+        }
+
+        // Handle activate / deactivate / delete clicks (event delegation).
+        rowsEl.addEventListener("click", async (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            const { action, id, name } = button.dataset;
+
+            if (action === "delete") {
+                const ok = window.confirm(`Delete ${name}? This cannot be undone.`);
+                if (!ok) return;
+            }
+
+            const url = action === "delete"
+                ? `/api/users/${id}`
+                : `/api/users/${id}/${action}`;
+            const method = action === "delete" ? "DELETE" : "POST";
+
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(url, { method });
+                if (!response.ok) {
+                    const msg = await Users.errorMessage(response, "Action failed.");
+                    window.alert(msg);
+                    button.disabled = false;
+                    return;
+                }
+                loadUsers();   // refresh the table to reflect the change
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        // ---- wire up the filter/search/sort/paging controls ----------------
+
+        // Debounce the search box so we don't fire a request on every keystroke.
+        let searchTimer = null;
+        document.getElementById("f-search").addEventListener("input", (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.search = e.target.value.trim();
+                state.page = 1;
+                loadUsers();
+            }, 300);
+        });
+
+        document.getElementById("f-role").addEventListener("change", (e) => {
+            state.role_id = e.target.value;
+            state.page = 1;
+            loadUsers();
+        });
+
+        document.getElementById("f-status").addEventListener("change", (e) => {
+            state.is_active = e.target.value;
+            state.page = 1;
+            loadUsers();
+        });
+
+        // Clicking a sortable header sorts by it; clicking the same one flips order.
+        document.querySelectorAll("th.sortable").forEach((th) => {
+            th.addEventListener("click", () => {
+                const column = th.dataset.sort;
+                if (state.sort === column) {
+                    state.order = state.order === "asc" ? "desc" : "asc";
+                } else {
+                    state.sort = column;
+                    state.order = "desc";
+                }
+                state.page = 1;
+                loadUsers();
+            });
+        });
+
+        document.getElementById("prev-btn").addEventListener("click", () => {
+            if (state.page > 1) { state.page -= 1; loadUsers(); }
+        });
+        document.getElementById("next-btn").addEventListener("click", () => {
+            state.page += 1; loadUsers();
+        });
+
+        // ---- start up ------------------------------------------------------
+        async function init() {
+            // Learn who we are and what we can do (drives the UI gating).
+            myPermissions = await Users.fetchMyPermissions();
+            try {
+                const meResp = await Auth.apiFetch("/auth/me");
+                if (meResp.ok) myUserId = (await meResp.json()).id;
+            } catch (err) { /* ignore */ }
+
+            if (myPermissions.has("users.create")) {
+                document.getElementById("new-user-btn").style.display = "";
+            }
+
+            await loadRoles();
+            await loadUsers();
+        }
+        init();
+    </script>
+</body>
+</html>
