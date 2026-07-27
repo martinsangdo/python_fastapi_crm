@@ -18,7 +18,12 @@ load_dotenv()
 
 # Read the database connection string from the environment.
 DATABASE_URL = os.getenv("DATABASE_URL")
-
+if DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1,
+    )
 # The "engine" is the core connection to the database.
 # SQLAlchemy uses it to open and manage connections for us.
 engine = create_engine(DATABASE_URL)
