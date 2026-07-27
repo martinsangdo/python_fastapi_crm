@@ -73,13 +73,25 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
 # JSON Web Tokens (JWT)
 # ---------------------------------------------------------------------------
 
-def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> str:
+def _create_token(
+    subject: str,
+    token_type: str,
+    expires_delta: timedelta,
+    extra_claims: dict | None = None,
+) -> str:
     """
     Build and sign a JWT.
 
     - subject: who the token is about (we use the user's id).
     - token_type: "access" or "refresh" so we can tell them apart.
     - expires_delta: how long from now the token stays valid.
+    - extra_claims: optional NON-sensitive identity fields to embed (e.g. the
+      user's email and role_id on an access token).
+
+    IMPORTANT: we NEVER put permissions in a token. Permissions are always read
+    fresh from the database on each request (see docs/rbac_guidelines.md §8), so
+    a permission change takes effect immediately instead of being frozen into a
+    token until it expires.
     """
     now = datetime.now(timezone.utc)
     payload = {
@@ -88,15 +100,29 @@ def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> st
         "iat": now,                 # "issued at" — when it was created
         "exp": now + expires_delta,  # "expires" — when it stops working
     }
+    if extra_claims:
+        payload.update(extra_claims)
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
-def create_access_token(subject: str) -> str:
-    """A short-lived token the browser sends with every protected request."""
+def create_access_token(subject: str, email: str | None = None, role_id=None) -> str:
+    """
+    A short-lived token the browser sends with every protected request.
+
+    Besides the user id (`sub`), an access token also carries the user's `email`
+    and `role_id` so simple identity checks don't need a database round-trip. It
+    deliberately does NOT carry the user's permissions — those are loaded from
+    the database on every request. The extra fields are optional so older callers
+    that pass only the id keep working unchanged.
+    """
     return _create_token(
         subject,
         "access",
         timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        extra_claims={
+            "email": email,
+            "role_id": str(role_id) if role_id is not None else None,
+        },
     )
 
 

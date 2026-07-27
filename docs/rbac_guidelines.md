@@ -195,6 +195,38 @@ if (permissions.includes("reports.view")) showMenu("Reports");
 > Menu visibility is **convenience only**. Hiding a menu item does not protect
 > anything — the server still enforces the permission on every request (§7).
 
+### 4a. The `navigation` object (implementation note)
+
+So the frontend does not have to hardcode the menu, the backend builds it and
+returns it ready-filtered. `POST /auth/login` and `GET /auth/me` include a
+`navigation` array; each item is:
+
+```json
+{
+  "module": "customers",
+  "menu_title": "Customers",
+  "route": "/customers",
+  "icon": "customers",
+  "required_permission": "customers.read"
+}
+```
+
+Rules that keep this consistent with the design above:
+
+- The array contains **only** items whose `required_permission` is in the user's
+  live permission set — a user never receives a menu item for a module they
+  cannot access.
+- The menu *metadata* (title, route, icon, and which permission each item
+  requires) lives in [`navigation.py`](../navigation.py). That file is **not** a
+  permission registry and **not** a source of truth: it only maps a menu item to
+  the permission `code` it needs. The permissions themselves, and who has them,
+  remain in the database.
+- If a listed item's `required_permission` does not exist in the `permissions`
+  table, no user can hold it, so the item simply never appears ("fail closed").
+
+The frontend builds its sidebar directly from this array and still uses the flat
+`permissions` list (§6) to show/hide individual buttons.
+
 ---
 
 ## 5. How pages map to permissions
@@ -326,6 +358,30 @@ Important rules:
   authoritative, always-current source remains `GET /api/me/permissions` and the
   per-request server checks.
 
+**Implementation note (as shipped).** `POST /auth/login` returns a
+`LoginResponse` (see [`schemas.py`](../schemas.py)):
+
+```json
+{
+  "access_token": "…",
+  "refresh_token": "…",
+  "token_type": "bearer",
+  "user": { "id": "…", "email": "…", "full_name": "…", "is_active": true, "…": "…" },
+  "role": { "id": "…", "code": "SALES", "name": "Sales" },
+  "permissions": ["customers.read", "dashboard.view"],
+  "navigation": [ { "module": "dashboard", "…": "…" } ]
+}
+```
+
+- `role` and `permissions` are resolved from the database via
+  `get_user_permission_codes` at request time; the permission set is loaded
+  **once** and reused for both `permissions` and `navigation`.
+- The **access token** carries only `sub` (user_id), `email`, `role_id`, and
+  `exp` — never permissions. `password_hash` is never included anywhere in the
+  response.
+- The token/`token_type` fields are unchanged from before, so existing clients
+  keep working (backward compatible).
+
 ---
 
 ## 9. How `GET /auth/me` should return role and permissions
@@ -352,6 +408,10 @@ Guidance:
   simply bundles it with the profile so the app can bootstrap in one call.
 - This endpoint is available to any authenticated user (guard with
   `get_current_user`, not `require_permission`).
+
+**Implementation note (as shipped).** `GET /auth/me` returns a `MeResponse` with
+`user`, `role`, `permissions`, and the same permission-filtered `navigation`
+array as login (§4a) — all recomputed from the database on each call.
 
 ---
 

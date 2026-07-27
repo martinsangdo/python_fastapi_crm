@@ -22,12 +22,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 import auth_service
+from authorization import get_user_permission_codes
 from database import get_db
 from dependencies import get_current_user
 from models import User
+from navigation import build_navigation
 from schemas import (
+    LoginResponse,
+    MeResponse,
     PasswordChange,
     RefreshRequest,
+    RoleInfo,
     TokenPair,
     UserLogin,
     UserPublic,
@@ -42,9 +47,31 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def _tokens_for(user: User) -> TokenPair:
     """Build a fresh access + refresh token pair for a user."""
     return TokenPair(
-        access_token=create_access_token(user.id),
+        # The access token also carries the user's email and role_id (identity
+        # only — never permissions; those come from the database each request).
+        access_token=create_access_token(user.id, email=user.email, role_id=user.role_id),
         refresh_token=create_refresh_token(user.id),
     )
+
+
+def _auth_context(db: Session, user: User) -> dict:
+    """
+    Build the RBAC part of a response: the user's role, their effective
+    permission codes and the navigation menu derived from those permissions.
+
+    The permission set is loaded from the database ONCE here and reused for both
+    the `permissions` list and `navigation`, so we never query it twice
+    (docs/rbac_guidelines.md §1, §4). The menu only contains items the user is
+    authorized to access.
+    """
+    permission_codes = get_user_permission_codes(db, user)
+    role = RoleInfo.model_validate(user.role) if user.role is not None else None
+    return {
+        "user": user,
+        "role": role,
+        "permissions": sorted(permission_codes),
+        "navigation": build_navigation(permission_codes),
+    }
 
 
 @router.post(
@@ -62,16 +89,27 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
     return user
 
 
-@router.post("/login", response_model=TokenPair)
+@router.post("/login", response_model=LoginResponse)
 def login(data: UserLogin, db: Session = Depends(get_db)):
-    """Check the email + password and hand back a token pair."""
+    """
+    Check the email + password, then hand back the tokens PLUS everything the
+    frontend needs to render itself: the user profile, their role, their
+    permission codes, and the permission-filtered navigation menu. The role and
+    permissions are always loaded from the database (docs/rbac_guidelines.md §8).
+    """
     try:
         user = auth_service.authenticate_user(db, data)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)
         )
-    return _tokens_for(user)
+    tokens = _tokens_for(user)
+    return LoginResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        token_type=tokens.token_type,
+        **_auth_context(db, user),
+    )
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -119,10 +157,18 @@ def logout(_: User = Depends(get_current_user)):
     return {"detail": "Logged out. Please discard your tokens."}
 
 
-@router.get("/me", response_model=UserPublic)
-def read_me(current_user: User = Depends(get_current_user)):
-    """Return the profile of whoever is currently logged in."""
-    return current_user
+@router.get("/me", response_model=MeResponse)
+def read_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the profile of whoever is currently logged in, together with their
+    role, permissions and navigation — all resolved fresh from the database on
+    each call (docs/rbac_guidelines.md §9), so a role or permission change is
+    reflected on the very next request.
+    """
+    return MeResponse(**_auth_context(db, current_user))
 
 
 @router.post("/change-password", status_code=status.HTTP_200_OK)

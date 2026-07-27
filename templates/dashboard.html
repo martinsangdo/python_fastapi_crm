@@ -19,6 +19,14 @@
             <dd id="user-email">…</dd>
         </dl>
 
+        <!-- Administration shortcuts. Each link is shown only if the logged-in
+             user holds the matching permission (filled in by JavaScript). -->
+        <nav id="admin-nav" style="display:none; margin-bottom: 1.25rem;">
+            <div class="divider"></div>
+            <a id="users-link" href="/admin/users" class="btn secondary"
+               style="display:none">Manage users</a>
+        </nav>
+
         <!-- The logout button. -->
         <button id="logout-btn" class="btn">Log out</button>
     </main>
@@ -40,6 +48,23 @@
             }
         }
         loadUser();
+
+        // Show the "Manage users" link only if the user has the users.read
+        // permission. (The API still enforces this on its own.)
+        async function loadAdminLinks() {
+            try {
+                const response = await Auth.apiFetch("/api/me/permissions");
+                if (!response.ok) return;
+                const { permissions } = await response.json();
+                if (permissions.includes("users.read")) {
+                    document.getElementById("admin-nav").style.display = "";
+                    document.getElementById("users-link").style.display = "";
+                }
+            } catch (err) {
+                // No admin links if we can't confirm the permission.
+            }
+        }
+        loadAdminLinks();
 
         // 3. Wire up the logout button.
         document

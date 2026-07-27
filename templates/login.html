@@ -44,9 +44,10 @@
     <!-- Our shared auth helper (login, token storage, redirects). -->
     <script src="/static/auth.js"></script>
     <script>
-        // If the visitor is already logged in, skip the form.
+        // If the visitor is already logged in, skip the form and send them to
+        // the landing page their permissions allow.
         if (Auth.isLoggedIn()) {
-            window.location.href = "/dashboard";
+            window.location.href = Auth.getLandingRoute();
         }
 
         const form = document.getElementById("login-form");
@@ -60,8 +61,8 @@
             const password = form.password.value;
 
             try {
-                await Auth.login(email, password);   // stores tokens on success
-                window.location.href = "/dashboard"; // go to the protected page
+                await Auth.login(email, password);        // stores tokens + landing route
+                window.location.href = Auth.getLandingRoute(); // first module they can access
             } catch (err) {
                 errorBox.textContent = err.message;
             }

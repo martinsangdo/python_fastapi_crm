@@ -49,7 +49,7 @@
     <script>
         // If the visitor is already logged in, skip the form.
         if (Auth.isLoggedIn()) {
-            window.location.href = "/dashboard";
+            window.location.href = Auth.getLandingRoute();
         }
 
         const form = document.getElementById("register-form");
@@ -66,7 +66,9 @@
             try {
                 // register() also logs the new user in on success.
                 await Auth.register(fullName, email, password);
-                window.location.href = "/dashboard";
+                // A brand-new account has no role yet, so navigation is empty
+                // and this falls back to the default landing page.
+                window.location.href = Auth.getLandingRoute();
             } catch (err) {
                 errorBox.textContent = err.message;
             }

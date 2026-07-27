@@ -20,6 +20,14 @@
 // The keys we use inside localStorage.
 const ACCESS_KEY = "crm_access_token";
 const REFRESH_KEY = "crm_refresh_token";
+// Where to send the user after login. We derive it from their permissions
+// (the first menu item they are allowed to see) instead of hardcoding a page,
+// so e.g. a Sales user is never dropped on a Dashboard they cannot use.
+const LANDING_KEY = "crm_landing_route";
+
+// Fallback when the user has no navigation items yet (e.g. a brand-new account
+// with no role assigned). Kept as a single place to change.
+const DEFAULT_LANDING_ROUTE = "/dashboard";
 
 const Auth = {
   // ---- token storage -------------------------------------------------------
@@ -40,10 +48,30 @@ const Auth = {
   clearTokens() {
     localStorage.removeItem(ACCESS_KEY);
     localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(LANDING_KEY);
   },
 
   isLoggedIn() {
     return Boolean(this.getAccessToken());
+  },
+
+  // ---- landing page (derived from permissions) -----------------------------
+
+  /**
+   * Remember where to send this user after login: the route of the first menu
+   * item in their permission-filtered navigation. Falls back to a default when
+   * they have no accessible modules yet.
+   */
+  saveLandingRoute(loginData) {
+    const nav = (loginData && loginData.navigation) || [];
+    const route = nav.length > 0 ? nav[0].route : DEFAULT_LANDING_ROUTE;
+    localStorage.setItem(LANDING_KEY, route);
+    return route;
+  },
+
+  /** The page a just-logged-in user should be sent to. */
+  getLandingRoute() {
+    return localStorage.getItem(LANDING_KEY) || DEFAULT_LANDING_ROUTE;
   },
 
   // ---- API helpers ---------------------------------------------------------
@@ -66,6 +94,10 @@ const Auth = {
 
     const data = await response.json();
     this.saveTokens(data.access_token, data.refresh_token);
+    // The login response includes the permission-filtered navigation menu; use
+    // its first item as the landing page for this user.
+    this.saveLandingRoute(data);
+    return data;
   },
 
   /**
