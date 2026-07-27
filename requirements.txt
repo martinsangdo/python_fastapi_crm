@@ -11,7 +11,7 @@ jinja2
 sqlalchemy==2.0.41
 
 # PostgreSQL driver (works with Supabase)
-psycopg[binary]
+psycopg[binary]>=3.2.9
 
 # Loads variables from the .env file
 python-dotenv
