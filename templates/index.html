@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <!-- Makes the page responsive on phones, tablets, and desktops. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- The page title shown on the browser tab. Value comes from app.py. -->
+    <title>{{ title }}</title>
+
+    <!-- Link to our external CSS file served from the /static folder. -->
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <!-- A centered card holding the welcome content. -->
+    <main class="card">
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+    </main>
+</body>
+</html>

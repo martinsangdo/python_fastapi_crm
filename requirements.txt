@@ -1,0 +1,17 @@
+# Web framework
+fastapi
+
+# ASGI server used to run the app
+uvicorn[standard]
+
+# HTML templating engine
+jinja2
+
+# Database toolkit (ORM)
+sqlalchemy
+
+# PostgreSQL driver (works with Supabase)
+psycopg[binary]
+
+# Loads variables from the .env file
+python-dotenv
