@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import calendar
+from datetime import date, datetime
 from typing import List, Dict, Any, Optional
 
 import streamlit as st
@@ -427,6 +429,142 @@ class MCPAgent:
 
 
 # ==============================================================================
+# ROOM OCCUPANCY CALENDAR
+# ==============================================================================
+def _find_column(row: Dict[str, Any], *candidates: str) -> Optional[str]:
+    """Case-insensitive lookup of a column name that may vary between sheets (e.g. 'CheckIn' vs 'Check-in')."""
+    lowered = {k.strip().lower(): k for k in row.keys()}
+    for candidate in candidates:
+        key = lowered.get(candidate.lower())
+        if key is not None:
+            return key
+    return None
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    value = str(value).strip()
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def get_occupancy_events(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Builds {room, check_in, check_out} entries for bookings that actually occupy a room.
+
+    A booking occupies its room for every night from check-in up to (but not including)
+    check-out. Cancelled bookings never occupy a room, regardless of their dates.
+    """
+    if not records:
+        return []
+
+    sample = records[0]
+    checkin_col = _find_column(sample, "CheckIn", "Check In", "Check-in")
+    checkout_col = _find_column(sample, "CheckOut", "Check Out", "Check-out")
+    room_col = _find_column(sample, "Room", "Room Number", "RoomNumber")
+    status_col = _find_column(sample, "Status")
+
+    if not (checkin_col and checkout_col and room_col):
+        return []
+
+    events = []
+    for row in records:
+        status = str(row.get(status_col, "")).strip().lower() if status_col else ""
+        if status == "cancelled":
+            continue
+
+        check_in = _parse_date(row.get(checkin_col, ""))
+        check_out = _parse_date(row.get(checkout_col, ""))
+        room = str(row.get(room_col, "")).strip()
+
+        if check_in and check_out and room:
+            events.append({"room": room, "check_in": check_in, "check_out": check_out})
+
+    return events
+
+
+def get_occupied_rooms_by_day(events: List[Dict[str, Any]], year: int, month: int) -> Dict[int, List[str]]:
+    """Maps each day-of-month to the list of rooms occupied that night."""
+    _, days_in_month = calendar.monthrange(year, month)
+    occupied: Dict[int, List[str]] = {}
+
+    for day_num in range(1, days_in_month + 1):
+        current = date(year, month, day_num)
+        rooms_today = sorted({e["room"] for e in events if e["check_in"] <= current < e["check_out"]})
+        if rooms_today:
+            occupied[day_num] = rooms_today
+
+    return occupied
+
+
+def render_occupancy_calendar(mcp_server: GoogleSheetsMCPServer):
+    """Renders a month-view calendar highlighting dates that have occupied rooms."""
+    st.subheader("📅 Room Occupancy Calendar")
+
+    if not mcp_server.client:
+        st.info("Add a Google API key or service account in the sidebar to see the occupancy calendar.")
+        return
+
+    metadata = json.loads(mcp_server.execute_tool("get_sheet_metadata", {}))
+    if "error" in metadata:
+        st.warning(f"Couldn't load calendar data: {metadata['error']}")
+        return
+
+    ws_titles = [ws["worksheet_title"] for ws in metadata.get("worksheets", [])]
+    if not ws_titles:
+        st.info("This sheet has no worksheets to show.")
+        return
+    ws_title = ws_titles[0] if len(ws_titles) == 1 else st.selectbox("Worksheet", ws_titles)
+
+    today = date.today()
+    col1, col2 = st.columns(2)
+    with col1:
+        year = int(st.number_input("Year", min_value=2000, max_value=2100, value=today.year, step=1))
+    with col2:
+        month = st.selectbox(
+            "Month", options=list(range(1, 13)), index=today.month - 1,
+            format_func=lambda m: calendar.month_name[m]
+        )
+
+    data = json.loads(mcp_server.execute_tool("read_sheet_data", {"worksheet_name": ws_title, "limit": 10000}))
+    if "error" in data:
+        st.warning(f"Couldn't load calendar data: {data['error']}")
+        return
+
+    events = get_occupancy_events(data.get("data", []))
+    if not events:
+        st.info("No CheckIn / CheckOut / Room / Status columns found, or no active bookings in this worksheet.")
+        return
+
+    occupied_by_day = get_occupied_rooms_by_day(events, year, month)
+
+    weeks = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
+    header_cols = st.columns(7)
+    for col, label in zip(header_cols, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+        col.markdown(f"**{label}**")
+
+    for week in weeks:
+        week_cols = st.columns(7)
+        for col, day_num in zip(week_cols, week):
+            if day_num == 0:
+                col.write("")
+                continue
+            rooms = occupied_by_day.get(day_num, [])
+            with col.container(border=True):
+                if rooms:
+                    st.markdown(f"**{day_num}** 🔴")
+                    st.caption("Room " + ", ".join(rooms))
+                else:
+                    st.markdown(f"{day_num}")
+
+    st.caption("🔴 = at least one room occupied that night (Cancelled bookings are excluded)")
+
+
+# ==============================================================================
 # STREAMLIT USER INTERFACE
 # ==============================================================================
 def main():
@@ -478,6 +616,12 @@ def main():
             st.session_state.messages = []
             st.rerun()
 
+    # Initialize the MCP Server once per rerun - shared by the calendar and the chat agent
+    mcp_server = GoogleSheetsMCPServer(sheet_id=sheet_id, credentials_dict=creds_data, api_key=google_api_key)
+
+    render_occupancy_calendar(mcp_server)
+    st.markdown("---")
+
     # Session State Initialization
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -498,8 +642,7 @@ def main():
         with st.chat_message("user"):
             st.markdown(user_prompt)
 
-        # Initialize MCP Server & Groq Agent
-        mcp_server = GoogleSheetsMCPServer(sheet_id=sheet_id, credentials_dict=creds_data, api_key=google_api_key)
+        # Initialize Groq Agent (reuses the MCP Server created above)
         agent = MCPAgent(api_key=groq_key, mcp_server=mcp_server)
 
         # Generate Assistant Response
