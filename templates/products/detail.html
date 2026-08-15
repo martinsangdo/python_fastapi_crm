@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products" class="active">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1 id="page-title">Product detail</h1>
+            <div class="page-actions">
+                <a href="/products" class="btn small secondary">Back to list</a>
+                <a id="edit-btn" href="#" class="btn small" style="display:none">Edit</a>
+                <button id="toggle-btn" class="btn small secondary" style="display:none"></button>
+                <button id="delete-btn" class="btn small danger" style="display:none">Delete</button>
+            </div>
+        </div>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="panel">
+            <dl id="detail" class="detail-grid">
+                <div class="state-row"><dd>Loading…</dd></div>
+            </dl>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/products.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const productId = "{{ product_id }}";
+        const detailEl = document.getElementById("detail");
+        const banner = document.getElementById("banner");
+        let currentProduct = null;
+
+        function field(label, valueHtml, id) {
+            const idAttr = id ? ` id="${id}"` : "";
+            return `<div><dt>${Products.escapeHtml(label)}</dt><dd${idAttr}>${valueHtml}</dd></div>`;
+        }
+
+        function statusBadge(isActive) {
+            return isActive
+                ? '<span class="badge active">Active</span>'
+                : '<span class="badge inactive">Inactive</span>';
+        }
+
+        function renderToggleButton() {
+            const btn = document.getElementById("toggle-btn");
+            btn.textContent = currentProduct.is_active ? "Deactivate" : "Activate";
+        }
+
+        async function loadProduct() {
+            let myPermissions = new Set();
+            try {
+                myPermissions = await Products.fetchMyPermissions();
+
+                const response = await Auth.apiFetch(`/api/products/${productId}`);
+                if (!response.ok) {
+                    const msg = await Products.errorMessage(response, "Could not load the product.");
+                    Products.showBanner(banner, msg, "error");
+                    detailEl.innerHTML = "";
+                    return;
+                }
+                currentProduct = await response.json();
+
+                document.getElementById("page-title").textContent = currentProduct.name;
+
+                detailEl.innerHTML = [
+                    field("SKU", Products.escapeHtml(currentProduct.sku)),
+                    field("Name", Products.escapeHtml(currentProduct.name)),
+                    field("Category", `<a href="/categories/${currentProduct.category.id}">${Products.escapeHtml(currentProduct.category.name)}</a>`),
+                    field("Description", currentProduct.description
+                        ? Products.escapeHtml(currentProduct.description).replaceAll("\n", "<br>")
+                        : "—"),
+                    field("Price", Products.formatMoney(currentProduct.price)),
+                    field("Stock quantity", String(currentProduct.stock_quantity)),
+                    field("Status", statusBadge(currentProduct.is_active), "status-value"),
+                    field("Created", Products.formatDate(currentProduct.created_at)),
+                ].join("");
+
+                if (myPermissions.has("products.update")) {
+                    const editBtn = document.getElementById("edit-btn");
+                    editBtn.href = `/products/${productId}/edit`;
+                    editBtn.style.display = "";
+
+                    const toggleBtn = document.getElementById("toggle-btn");
+                    toggleBtn.style.display = "";
+                    renderToggleButton();
+                }
+                if (myPermissions.has("products.delete")) {
+                    document.getElementById("delete-btn").style.display = "";
+                }
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        document.getElementById("toggle-btn").addEventListener("click", async () => {
+            const button = document.getElementById("toggle-btn");
+            button.disabled = true;
+            const endpoint = currentProduct.is_active ? "deactivate" : "activate";
+            try {
+                const response = await Auth.apiFetch(`/api/products/${productId}/${endpoint}`, { method: "POST" });
+                if (!response.ok) {
+                    const msg = await Products.errorMessage(response, "Action failed.");
+                    Products.showBanner(banner, msg, "error");
+                    button.disabled = false;
+                    return;
+                }
+                currentProduct = await response.json();
+                document.getElementById("status-value").innerHTML = statusBadge(currentProduct.is_active);
+                renderToggleButton();
+                button.disabled = false;
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        document.getElementById("delete-btn").addEventListener("click", async () => {
+            const ok = window.confirm("Delete this product? This cannot be undone.");
+            if (!ok) return;
+
+            const button = document.getElementById("delete-btn");
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/products/${productId}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Products.errorMessage(response, "Could not delete the product.");
+                    Products.showBanner(banner, msg, "error");
+                    button.disabled = false;
+                    return;
+                }
+                window.location.href = "/products";
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        loadProduct();
+    </script>
+</body>
+</html>

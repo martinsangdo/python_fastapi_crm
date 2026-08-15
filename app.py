@@ -21,7 +21,7 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth, customers, users
+from routers import auth, categories, customers, orders, products, users
 from schemas.auth_schemas import UserPublic
 
 # Create the application instance.
@@ -46,6 +46,15 @@ app.include_router(users.router)
 
 # Plug in the Customers API (/api/customers).
 app.include_router(customers.router)
+
+# Plug in the Categories API (/api/categories).
+app.include_router(categories.router)
+
+# Plug in the Products API (/api/products).
+app.include_router(products.router)
+
+# Plug in the Orders API (/api/orders).
+app.include_router(orders.router)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +185,126 @@ def customers_edit_page(request: Request, customer_id: str):
         request,
         "customers/edit.html",
         {"title": "Edit customer", "customer_id": customer_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Categories pages (HTML shells)
+# ---------------------------------------------------------------------------
+# Same pattern as the Customers pages above: these routes only serve the HTML
+# shell. Each page's JavaScript checks the login token in the browser and
+# then calls the /api/categories API, where the real permission checks
+# happen (categories.read/create/update/delete).
+
+@app.get("/categories")
+def categories_list_page(request: Request):
+    """The category list (table with search, sort, paging)."""
+    return templates.TemplateResponse(
+        request, "categories/list.html", {"title": "Categories"}
+    )
+
+
+@app.get("/categories/new")
+def categories_create_page(request: Request):
+    """The create-category form."""
+    return templates.TemplateResponse(
+        request, "categories/create.html", {"title": "New category"}
+    )
+
+
+@app.get("/categories/{category_id}")
+def categories_detail_page(request: Request, category_id: str):
+    """The read-only detail view for one category."""
+    return templates.TemplateResponse(
+        request,
+        "categories/detail.html",
+        {"title": "Category detail", "category_id": category_id},
+    )
+
+
+@app.get("/categories/{category_id}/edit")
+def categories_edit_page(request: Request, category_id: str):
+    """The edit form for one category."""
+    return templates.TemplateResponse(
+        request,
+        "categories/edit.html",
+        {"title": "Edit category", "category_id": category_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Products pages (HTML shells)
+# ---------------------------------------------------------------------------
+
+@app.get("/products")
+def products_list_page(request: Request):
+    """The product list (table with search, filters, paging)."""
+    return templates.TemplateResponse(
+        request, "products/list.html", {"title": "Products"}
+    )
+
+
+@app.get("/products/new")
+def products_create_page(request: Request):
+    """The create-product form."""
+    return templates.TemplateResponse(
+        request, "products/create.html", {"title": "New product"}
+    )
+
+
+@app.get("/products/{product_id}")
+def products_detail_page(request: Request, product_id: str):
+    """The read-only detail view for one product."""
+    return templates.TemplateResponse(
+        request,
+        "products/detail.html",
+        {"title": "Product detail", "product_id": product_id},
+    )
+
+
+@app.get("/products/{product_id}/edit")
+def products_edit_page(request: Request, product_id: str):
+    """The edit form for one product."""
+    return templates.TemplateResponse(
+        request,
+        "products/edit.html",
+        {"title": "Edit product", "product_id": product_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Orders pages (HTML shells)
+# ---------------------------------------------------------------------------
+
+@app.get("/orders")
+def orders_list_page(request: Request):
+    """The order list (table with search, filters, paging)."""
+    return templates.TemplateResponse(
+        request, "orders/list.html", {"title": "Orders"}
+    )
+
+
+@app.get("/orders/new")
+def orders_create_page(request: Request):
+    """The create-order form (customer + line items)."""
+    return templates.TemplateResponse(
+        request, "orders/create.html", {"title": "New order"}
+    )
+
+
+@app.get("/orders/{order_id}")
+def orders_detail_page(request: Request, order_id: str):
+    """The order detail view (header, line items, status control)."""
+    return templates.TemplateResponse(
+        request, "orders/detail.html", {"title": "Order detail", "order_id": order_id}
+    )
+
+
+@app.get("/orders/{order_id}/edit")
+def orders_edit_page(request: Request, order_id: str):
+    """The edit form for a pending order's address/line items."""
+    return templates.TemplateResponse(
+        request, "orders/edit.html", {"title": "Edit order", "order_id": order_id}
     )
 
 

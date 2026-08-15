@@ -3,25 +3,47 @@ models.py
 ---------
 The database tables, described as Python classes ("models").
 
-We have five models:
+We have these models:
   * `User`        — a person who can log in (the authentication module).
   * `Role`        — a named group a user belongs to, e.g. Admin / Manager / Sales.
   * `Permission`  — one thing that can be done, e.g. "customers.read".
   * `role_permissions` — the link table saying which permissions a role has.
-  * `Customer`    — a company or individual the CRM tracks (the Customers module).
+  * `Customer`    — a company or individual the CRM sells to (Customers module).
+  * `Address`     — a shipping address belonging to a customer.
+  * `Category`    — a product category (Categories module).
+  * `Product`     — an item in the catalog (Products module).
+  * `Order`       — a sales order placed by a customer (Orders module).
+  * `OrderItem`   — one product line on an order.
 
 The first four make up "RBAC" (Role-Based Access Control). To answer "can this
 user do X?" you follow: user -> role -> permissions.
 
 Each class attribute becomes a column. SQLAlchemy turns these classes into
 real SQL tables for us (see `Base.metadata.create_all(...)` in app.py). These
-models mirror the tables in `sql/rbac.sql` and `sql/customers.sql`.
+models mirror the tables in `sql/rbac.sql`, `sql/customers.sql`,
+`sql/categories.sql`, `sql/products.sql` and `sql/orders.sql`.
+
+NOTE on primary keys: `Customer`/`Category`/`Product`/`Order`/`OrderItem`/
+`Address` map to tables that ALREADY EXISTED in this Supabase project (they
+were not created by this app) with plain `BIGINT GENERATED ALWAYS AS IDENTITY`
+primary keys, so those models use `Integer` ids rather than the UUID ids
+used by the RBAC tables above.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Table, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Table,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -211,46 +233,19 @@ class Permission(Base):
 
 
 class Customer(Base):
-    """One row = one company or individual the CRM tracks."""
+    """One row = one person who buys from us (the Customers module)."""
 
-    # Named "crm_customers" (not "customers") because this database already
-    # has an unrelated "customers" table from another project sharing the
-    # same Supabase instance — this avoids colliding with its data/schema.
-    __tablename__ = "crm_customers"
+    __tablename__ = "customers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # This table already existed in Supabase with a plain, auto-incrementing
+    # BIGINT id (not the UUID style the RBAC tables above use), so we map to
+    # it exactly as it is rather than redefining it.
+    id = Column(Integer, primary_key=True)
 
-    # Company or full contact name. The one field every customer must have.
-    name = Column(String(255), nullable=False, index=True)
-
-    # Contact details. All optional — a lead may start with just a name.
-    email = Column(String(255), nullable=True)
-    phone = Column(String(50), nullable=True)
-    company = Column(String(255), nullable=True)
-
-    # One of "active" | "inactive" | "lead" (enforced in the service layer).
-    status = Column(String(20), nullable=False, default="active", index=True)
-
-    address_line = Column(String(255), nullable=True)
-    city = Column(String(120), nullable=True)
-    country = Column(String(120), nullable=True)
-    notes = Column(Text, nullable=True)
-
-    # The salesperson responsible for this customer. NULL if unassigned; set
-    # back to NULL (not deleted) if that user's account is removed.
-    owner_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        index=True,
-        nullable=True,
-    )
-
-    # Who created this record, for auditing. Same NULL-on-delete behaviour.
-    created_by = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # The one thing every customer must have, and how we contact them.
+    # UNIQUE at the database level — see sql/customers.sql.
+    email = Column(String, nullable=False, unique=True, index=True)
+    full_name = Column(String, nullable=False, index=True)
 
     created_at = Column(
         DateTime(timezone=True),
@@ -258,17 +253,190 @@ class Customer(Base):
         nullable=False,
         index=True,
     )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
 
-    # Convenience links to the full User objects (no back_populates on User —
-    # we don't need "all customers this user owns" from the User side yet).
-    owner = relationship("User", foreign_keys=[owner_id])
-    creator = relationship("User", foreign_keys=[created_by])
+    # One customer can have many saved shipping addresses.
+    addresses = relationship("Address", back_populates="customer")
 
     def __repr__(self) -> str:
-        return f"<Customer name={self.name!r} status={self.status!r}>"
+        return f"<Customer email={self.email!r}>"
+
+
+class Address(Base):
+    """One row = one shipping address that belongs to a customer."""
+
+    __tablename__ = "addresses"
+
+    id = Column(Integer, primary_key=True)
+
+    # Deleting a customer deletes their saved addresses too (DB-enforced).
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    line1 = Column(Text, nullable=False)
+    city = Column(Text, nullable=False)
+    postal_code = Column(Text, nullable=False)
+    country = Column(Text, nullable=False)
+    is_default = Column(Boolean, nullable=False, default=False)
+
+    customer = relationship("Customer", back_populates="addresses")
+
+    def __repr__(self) -> str:
+        return f"<Address id={self.id} customer_id={self.customer_id}>"
+
+
+class Category(Base):
+    """One row = one product category (the Categories module)."""
+
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(Text, nullable=False)
+    # URL-friendly unique identifier, e.g. "home-kitchen". Generated from
+    # `name` in the service layer if the caller does not supply one.
+    slug = Column(Text, nullable=False, unique=True, index=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+    products = relationship("Product", back_populates="category")
+
+    def __repr__(self) -> str:
+        return f"<Category name={self.name!r} slug={self.slug!r}>"
+
+
+class Product(Base):
+    """One row = one item in the catalog (the Products module)."""
+
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True)
+
+    # Every product belongs to exactly one category. A category with
+    # products cannot be deleted (DB FK is ON DELETE RESTRICT).
+    category_id = Column(
+        Integer,
+        ForeignKey("categories.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    sku = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+
+    # Money is stored as NUMERIC (Decimal in Python), never float, so prices
+    # never suffer floating-point rounding errors.
+    price = Column(Numeric(12, 2), nullable=False)
+
+    stock_quantity = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+    category = relationship("Category", back_populates="products")
+
+    def __repr__(self) -> str:
+        return f"<Product sku={self.sku!r} name={self.name!r}>"
+
+
+class Order(Base):
+    """One row = one sales order placed by a customer (the Orders module)."""
+
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True)
+
+    # A customer with orders cannot be hard-deleted (DB FK is ON DELETE
+    # RESTRICT) — see service/customers_service.py's delete guard.
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    # One of "pending" | "paid" | "shipped" | "completed" | "cancelled"
+    # (enforced in the service layer — see service/orders_service.py).
+    status = Column(String, nullable=False, default="pending", index=True)
+
+    # Optional: which of the customer's saved addresses to ship to. Kept if
+    # the address is later removed (SET NULL), so the order itself survives.
+    shipping_address_id = Column(
+        Integer,
+        ForeignKey("addresses.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Always the sum of item line totals, recomputed server-side on every
+    # write — never trusted from the client.
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    placed_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+    customer = relationship("Customer")
+    shipping_address = relationship("Address")
+    # Deleting an order deletes its line items too (DB-enforced CASCADE);
+    # `cascade="all, delete-orphan"` keeps the Python side in sync.
+    items = relationship(
+        "OrderItem",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderItem.id",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Order id={self.id} status={self.status!r}>"
+
+
+class OrderItem(Base):
+    """One row = one product line on an order (quantity + snapshot price)."""
+
+    __tablename__ = "order_items"
+
+    id = Column(Integer, primary_key=True)
+
+    order_id = Column(
+        Integer,
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # A product referenced by an order line cannot be hard-deleted (DB FK is
+    # ON DELETE RESTRICT) — see service/products_service.py's delete guard.
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    quantity = Column(Integer, nullable=False)
+
+    # Snapshot of the product's price AT ORDER TIME, so later catalog price
+    # changes never rewrite the history of an already-placed order.
+    unit_price = Column(Numeric(12, 2), nullable=False)
+
+    order = relationship("Order", back_populates="items")
+    product = relationship("Product")
+
+    def __repr__(self) -> str:
+        return f"<OrderItem order_id={self.order_id} product_id={self.product_id}>"

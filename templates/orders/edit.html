@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders" class="active">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Edit order</h1>
+            <a id="detail-link" href="/orders" class="btn small secondary">Back to detail</a>
+        </div>
+
+        <div class="panel">
+            <form id="edit-form" class="admin-form order-form">
+                <div id="banner" class="banner"></div>
+
+                <div class="field">
+                    <span>Customer</span>
+                    <div id="customer-name">—</div>
+                </div>
+
+                <label class="field">
+                    <span>Shipping address</span>
+                    <select name="shipping_address_id">
+                        <option value="">No shipping address</option>
+                    </select>
+                </label>
+
+                <div class="field">
+                    <span>Line items</span>
+                    <div class="table-wrap">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Quantity</th>
+                                    <th>Unit price</th>
+                                    <th>Line total</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="items-rows"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="add-item-btn" class="btn small secondary">+ Add line</button>
+                </div>
+
+                <div class="order-total">Total: <strong id="total-preview">$0.00</strong></div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn">Save changes</button>
+                    <a id="cancel-link" href="/orders" class="btn secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/orders.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const orderId = "{{ order_id }}";
+        const editForm = document.getElementById("edit-form");
+        const banner = document.getElementById("banner");
+        const itemsRowsEl = document.getElementById("items-rows");
+        const totalPreviewEl = document.getElementById("total-preview");
+
+        document.getElementById("detail-link").href = `/orders/${orderId}`;
+        document.getElementById("cancel-link").href = `/orders/${orderId}`;
+
+        // Active products PLUS whatever this order's current lines point at,
+        // so an already-selected (possibly now-inactive) product still shows.
+        let selectableProducts = [];
+
+        function productOptionsHtml(selectedId) {
+            return selectableProducts.map((p) => {
+                const selected = String(p.id) === String(selectedId) ? "selected" : "";
+                return `<option value="${p.id}" ${selected}>${Orders.escapeHtml(p.sku)} — ${Orders.escapeHtml(p.name)} (${Orders.formatMoney(p.price)}, ${p.stock_quantity} in stock)</option>`;
+            }).join("");
+        }
+
+        function recomputeTotal() {
+            let total = 0;
+            itemsRowsEl.querySelectorAll("tr").forEach((row) => {
+                const productId = row.querySelector(".item-product").value;
+                const qty = Number(row.querySelector(".item-qty").value) || 0;
+                const product = selectableProducts.find((p) => String(p.id) === String(productId));
+                const price = product ? Number(product.price) : 0;
+                const lineTotal = price * qty;
+                row.querySelector(".item-unit-price").textContent = product ? Orders.formatMoney(price) : "—";
+                row.querySelector(".item-line-total").textContent = product ? Orders.formatMoney(lineTotal) : "—";
+                total += lineTotal;
+            });
+            totalPreviewEl.textContent = Orders.formatMoney(total);
+        }
+
+        function addRow(selectedProductId, quantity) {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td><select class="item-product">${productOptionsHtml(selectedProductId)}</select></td>
+                <td><input type="number" class="item-qty" min="1" step="1" value="${quantity || 1}" /></td>
+                <td class="item-unit-price">—</td>
+                <td class="item-line-total">—</td>
+                <td><button type="button" class="danger remove-row">Remove</button></td>
+            `;
+            itemsRowsEl.appendChild(row);
+            row.querySelector(".item-product").addEventListener("change", recomputeTotal);
+            row.querySelector(".item-qty").addEventListener("input", recomputeTotal);
+            row.querySelector(".remove-row").addEventListener("click", () => {
+                row.remove();
+                recomputeTotal();
+            });
+            recomputeTotal();
+        }
+
+        document.getElementById("add-item-btn").addEventListener("click", () => addRow());
+
+        function disableForm(message) {
+            Orders.showBanner(banner, message, "error");
+            Array.from(editForm.elements).forEach((el) => { el.disabled = true; });
+        }
+
+        async function loadShippingAddresses(customerId, selectedId) {
+            const select = editForm.shipping_address_id;
+            select.innerHTML = '<option value="">No shipping address</option>';
+            try {
+                const response = await Auth.apiFetch(`/api/customers/${customerId}/addresses`);
+                if (!response.ok) return;
+                const addresses = await response.json();
+                for (const address of addresses) {
+                    const opt = document.createElement("option");
+                    opt.value = address.id;
+                    opt.textContent = `${address.line1}, ${address.city}${address.is_default ? " (default)" : ""}`;
+                    if (String(address.id) === String(selectedId)) opt.selected = true;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "No shipping address" only */ }
+        }
+
+        async function loadOrder() {
+            try {
+                const response = await Auth.apiFetch(`/api/orders/${orderId}`);
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not load the order.");
+                    disableForm(msg);
+                    return;
+                }
+                const order = await response.json();
+
+                if (order.status !== "pending") {
+                    disableForm(`This order is '${order.status}' and can no longer be edited.`);
+                    return;
+                }
+
+                document.getElementById("customer-name").textContent =
+                    `${order.customer.full_name} <${order.customer.email}>`;
+
+                // Seed the product picker with active products, plus any
+                // product already on this order (even if since deactivated).
+                const response2 = await Auth.apiFetch("/api/products?is_active=true&page_size=100&sort=name&order=asc");
+                selectableProducts = response2.ok ? (await response2.json()).items : [];
+                for (const item of order.items) {
+                    if (!selectableProducts.some((p) => p.id === item.product.id)) {
+                        selectableProducts.push({
+                            id: item.product.id,
+                            sku: item.product.name,
+                            name: item.product.name,
+                            price: item.unit_price,
+                            stock_quantity: 0,
+                        });
+                    }
+                }
+
+                for (const item of order.items) {
+                    addRow(item.product.id, item.quantity);
+                }
+                if (order.items.length === 0) addRow();
+
+                await loadShippingAddresses(order.customer.id, order.shipping_address ? order.shipping_address.id : "");
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            Orders.hideBanner(banner);
+
+            const items = [];
+            itemsRowsEl.querySelectorAll("tr").forEach((row) => {
+                const productId = row.querySelector(".item-product").value;
+                const qty = Number(row.querySelector(".item-qty").value);
+                if (productId && qty > 0) {
+                    items.push({ product_id: Number(productId), quantity: qty });
+                }
+            });
+
+            if (items.length === 0) {
+                Orders.showBanner(banner, "Add at least one line item.", "error");
+                return;
+            }
+
+            const submitBtn = editForm.querySelector("button[type=submit]");
+            submitBtn.disabled = true;
+
+            const payload = {
+                shipping_address_id: editForm.shipping_address_id.value ? Number(editForm.shipping_address_id.value) : null,
+                items,
+            };
+
+            try {
+                const response = await Auth.apiFetch(`/api/orders/${orderId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not save changes.");
+                    Orders.showBanner(banner, msg, "error");
+                    submitBtn.disabled = false;
+                    return;
+                }
+                Orders.showBanner(banner, "Changes saved.", "success");
+                submitBtn.disabled = false;
+            } catch (err) {
+                submitBtn.disabled = false;
+            }
+        });
+
+        loadOrder();
+    </script>
+</body>
+</html>

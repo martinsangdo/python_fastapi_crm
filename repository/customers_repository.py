@@ -18,14 +18,14 @@ from typing import Optional, Tuple
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from models import Customer
+from models import Address, Customer, Order
 
 # The columns a client is allowed to sort by. We map the public sort name to
 # the real model column. Anything not in this dict falls back to "created_at",
 # so a bad/unknown sort value can never crash the query or leak internals.
 _SORTABLE_COLUMNS = {
-    "name": Customer.name,
-    "status": Customer.status,
+    "full_name": Customer.full_name,
+    "email": Customer.email,
     "created_at": Customer.created_at,
 }
 
@@ -34,8 +34,6 @@ def list_customers(
     db: Session,
     *,
     search: Optional[str] = None,
-    status: Optional[str] = None,
-    owner_id=None,
     sort: str = "created_at",
     order: str = "desc",
     page: int = 1,
@@ -46,40 +44,23 @@ def list_customers(
     filters.
 
     Filtering:
-      - search:   matches name OR company OR email (case-insensitive, partial).
-      - status:   only customers with that exact status.
-      - owner_id: only customers owned by that user.
+      - search: matches full_name OR email (case-insensitive, partial).
 
     The total is counted BEFORE paging so the UI can show "page 2 of 7".
     """
     query = db.query(Customer)
 
-    # ---- filters ----------------------------------------------------------
     if search:
         like = f"%{search.strip()}%"
         query = query.filter(
-            or_(
-                Customer.name.ilike(like),
-                Customer.company.ilike(like),
-                Customer.email.ilike(like),
-            )
+            or_(Customer.full_name.ilike(like), Customer.email.ilike(like))
         )
 
-    if status is not None:
-        query = query.filter(Customer.status == status)
-
-    if owner_id is not None:
-        query = query.filter(Customer.owner_id == owner_id)
-
-    # Count the matches before we slice the query into a single page.
     total = query.count()
 
-    # ---- sorting ------------------------------------------------------------
     column = _SORTABLE_COLUMNS.get(sort, Customer.created_at)
     query = query.order_by(column.asc() if order == "asc" else column.desc())
 
-    # ---- paging -------------------------------------------------------------
-    # Clamp to sensible bounds so a client cannot ask for page 0 or 10,000 rows.
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -92,8 +73,33 @@ def get_customer(db: Session, customer_id) -> Optional[Customer]:
     return db.query(Customer).filter(Customer.id == customer_id).first()
 
 
+def get_customer_by_email(db: Session, email: str) -> Optional[Customer]:
+    """Look up a customer by their unique email (used to check for duplicates)."""
+    return db.query(Customer).filter(Customer.email == email).first()
+
+
+def count_orders(db: Session, customer_id) -> int:
+    """How many orders still reference this customer (blocks delete if > 0)."""
+    return db.query(Order).filter(Order.customer_id == customer_id).count()
+
+
+def list_addresses(db: Session, customer_id) -> list[Address]:
+    """A customer's saved shipping addresses (used by the Orders module)."""
+    return (
+        db.query(Address)
+        .filter(Address.customer_id == customer_id)
+        .order_by(Address.is_default.desc(), Address.id.asc())
+        .all()
+    )
+
+
+def get_address(db: Session, address_id) -> Optional[Address]:
+    """Load one address by id (used to validate an order's shipping address)."""
+    return db.query(Address).filter(Address.id == address_id).first()
+
+
 def add_customer(db: Session, customer: Customer) -> Customer:
-    """Persist a brand-new customer and reload it (fills in id/timestamps)."""
+    """Persist a brand-new customer and reload it (fills in id/created_at)."""
     db.add(customer)
     db.commit()
     db.refresh(customer)

@@ -1,70 +1,41 @@
 -- ---------------------------------------------------------------------------
 -- customers.sql  —  Customers module migration
 -- ---------------------------------------------------------------------------
--- Adds the `crm_customers` table: the CRM's directory of companies/contacts
--- that the Orders, Reports and Dashboard modules will build on later.
+-- Documents the `customers` table: the CRM's directory of people who buy
+-- from us, that the Orders module builds on.
 --
--- NOTE ON THE TABLE NAME: this is named "crm_customers", not "customers",
--- because this database already has an unrelated "customers" table (from a
--- different project sharing the same Supabase instance) with its own schema
--- and data. Using a distinct name avoids colliding with it.
+-- NOTE ON THE TABLE NAME: this table already existed in this Supabase
+-- project (with real seeded rows) before the Customers module's Python code
+-- was pointed at it. An earlier version of this module created its own
+-- `crm_customers` table instead, to avoid what looked like a name collision
+-- with an unrelated table — that turned out to be unnecessary: `customers`
+-- IS this app's table, so the module was rewritten to use it directly.
+-- `crm_customers` is no longer used by the app; it is left in place (empty)
+-- rather than dropped, since dropping tables is not something a migration
+-- file should do silently.
 --
 -- Safe to run directly in the Supabase SQL editor, and safe to run more than
 -- once: every step uses IF NOT EXISTS so re-running it will not error out.
 --
--- NOTE: app.py already calls Base.metadata.create_all(...) on startup, which
--- creates this table automatically from the Customer model in models.py. This
--- file exists for documentation / manual setup parity with that model — it is
--- not required for the app to work.
+-- NOTE: app.py already calls Base.metadata.create_all(...) on startup, but
+-- that only CREATES tables that do not exist yet — since `customers` already
+-- exists, create_all is a no-op for it. This file exists purely as
+-- documentation of the table shape the Customer model in models.py expects.
 -- ---------------------------------------------------------------------------
 
 BEGIN;
 
--- gen_random_uuid() lives in the pgcrypto extension. (Supabase enables this
--- already; the line is harmless if it is already on.)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-
 -- ===========================================================================
--- 1. crm_customers  —  companies / individuals the CRM tracks
+-- 1. customers  —  people who buy from us
 -- ===========================================================================
-CREATE TABLE IF NOT EXISTS crm_customers (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS customers (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
-    -- Company or full contact name. The one field every customer must have.
-    name          VARCHAR(255) NOT NULL,
+    -- Primary contact email. UNIQUE — one customer record per email address.
+    email       TEXT NOT NULL UNIQUE,
+    full_name   TEXT NOT NULL,
 
-    -- Contact details. All optional — a lead may start with just a name.
-    email         VARCHAR(255) NULL,
-    phone         VARCHAR(50)  NULL,
-    company       VARCHAR(255) NULL,
-
-    -- One of 'active' | 'inactive' | 'lead'. Enforced by the CHECK constraint
-    -- below AND re-checked in the service layer (belt and suspenders).
-    status        VARCHAR(20)  NOT NULL DEFAULT 'active',
-
-    address_line  VARCHAR(255) NULL,
-    city          VARCHAR(120) NULL,
-    country       VARCHAR(120) NULL,
-    notes         TEXT NULL,
-
-    -- The salesperson responsible for this customer. NULL if unassigned.
-    owner_id      UUID NULL REFERENCES users (id) ON DELETE SET NULL,
-
-    -- Who created this record, for auditing.
-    created_by    UUID NULL REFERENCES users (id) ON DELETE SET NULL,
-
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT ck_crm_customers_status
-        CHECK (status IN ('active', 'inactive', 'lead'))
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- Helpful indexes for the list page's search/filter/sort options.
-CREATE INDEX IF NOT EXISTS ix_crm_customers_name       ON crm_customers (name);
-CREATE INDEX IF NOT EXISTS ix_crm_customers_status     ON crm_customers (status);
-CREATE INDEX IF NOT EXISTS ix_crm_customers_owner      ON crm_customers (owner_id);
-CREATE INDEX IF NOT EXISTS ix_crm_customers_created_at ON crm_customers (created_at);
 
 COMMIT;

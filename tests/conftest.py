@@ -199,6 +199,81 @@ def seed(db_session):
     }
 
 
+@pytest.fixture()
+def crud_seed(db_session):
+    """
+    RBAC seed for the Categories / Products / Customers / Orders CRUD tests.
+
+    Kept SEPARATE from `seed` above (used by the Users/Auth tests) so adding
+    these newer permission codes here can never change what `seed` grants —
+    test_api_users.py's test_my_permissions_sales asserts an exact permission
+    list for the SALES role, and this fixture must not affect that.
+
+    Roles:
+      * ADMIN — every permission below (full CRUD on every module).
+      * SALES — customers.read/create/update, categories.read, products.read,
+                orders.read/create/update — mirrors the real grant in
+                sql/rbac.sql and sql/categories.sql (no deletes, no catalog
+                writes for Sales).
+    """
+    from models import Permission, Role, User
+    from security import hash_password
+
+    codes = [
+        "customers.read", "customers.create", "customers.update", "customers.delete",
+        "categories.read", "categories.create", "categories.update", "categories.delete",
+        "products.read", "products.create", "products.update", "products.delete",
+        "orders.read", "orders.create", "orders.update", "orders.delete",
+    ]
+    permissions = {}
+    for code in codes:
+        module, action = code.split(".")
+        perm = Permission(module=module, action=action, code=code)
+        db_session.add(perm)
+        permissions[code] = perm
+
+    admin_role = Role(code="ADMIN", name="Administrator", is_system=True)
+    admin_role.permissions = list(permissions.values())
+
+    sales_role = Role(code="SALES", name="Sales", is_system=False)
+    sales_role.permissions = [
+        permissions["customers.read"],
+        permissions["customers.create"],
+        permissions["customers.update"],
+        permissions["categories.read"],
+        permissions["products.read"],
+        permissions["orders.read"],
+        permissions["orders.create"],
+        permissions["orders.update"],
+    ]
+
+    db_session.add_all([admin_role, sales_role])
+
+    admin = User(
+        email="admin@example.com",
+        full_name="Admin User",
+        password_hash=hash_password(PASSWORD),
+        is_active=True,
+        role=admin_role,
+    )
+    sales = User(
+        email="sales@example.com",
+        full_name="Sales User",
+        password_hash=hash_password(PASSWORD),
+        is_active=True,
+        role=sales_role,
+    )
+    db_session.add_all([admin, sales])
+    db_session.commit()
+
+    return {
+        "password": PASSWORD,
+        "permissions": permissions,
+        "roles": {"admin": admin_role, "sales": sales_role},
+        "users": {"admin": admin, "sales": sales},
+    }
+
+
 def login(client, email, password=PASSWORD):
     """Helper: POST /auth/login and return the (response, json) pair."""
     response = client.post("/auth/login", json={"email": email, "password": password})

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories" class="active">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>New category</h1>
+            <a href="/categories" class="btn small secondary">Back to list</a>
+        </div>
+
+        <div class="panel">
+            <form id="create-form" class="admin-form">
+                <div id="banner" class="banner"></div>
+
+                <label class="field">
+                    <span>Name</span>
+                    <input type="text" name="name" maxlength="255" required />
+                </label>
+
+                <label class="field">
+                    <span>Slug</span>
+                    <input type="text" name="slug" maxlength="255" placeholder="Leave blank to generate from the name" />
+                </label>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn">Create category</button>
+                    <a href="/categories" class="btn secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/categories.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const form = document.getElementById("create-form");
+        const banner = document.getElementById("banner");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            Categories.hideBanner(banner);
+
+            const submitBtn = form.querySelector("button[type=submit]");
+            submitBtn.disabled = true;
+
+            const payload = {
+                name: form.name.value.trim(),
+                slug: form.slug.value.trim() || null,
+            };
+
+            try {
+                const response = await Auth.apiFetch("/api/categories", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const msg = await Categories.errorMessage(response, "Could not create category.");
+                    Categories.showBanner(banner, msg, "error");
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                const created = await response.json();
+                window.location.href = `/categories/${created.id}`;
+            } catch (err) {
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories" class="active">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1 id="page-title">Category detail</h1>
+            <div class="page-actions">
+                <a href="/categories" class="btn small secondary">Back to list</a>
+                <a id="edit-btn" href="#" class="btn small" style="display:none">Edit</a>
+                <button id="delete-btn" class="btn small danger" style="display:none">Delete</button>
+            </div>
+        </div>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="panel">
+            <dl id="detail" class="detail-grid">
+                <div class="state-row"><dd>Loading…</dd></div>
+            </dl>
+        </div>
+
+        <!-- Products in this category, if the viewer can see them. -->
+        <div class="panel" id="products-panel" style="display:none">
+            <h2>Products</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Name</th>
+                            <th>Price</th>
+                            <th>Stock</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-rows">
+                        <tr class="state-row"><td colspan="5">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/categories.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const categoryId = "{{ category_id }}";
+        const detailEl = document.getElementById("detail");
+        const banner = document.getElementById("banner");
+
+        function field(label, valueHtml) {
+            return `<div><dt>${Categories.escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+        }
+
+        async function loadCategory() {
+            let myPermissions = new Set();
+            try {
+                myPermissions = await Categories.fetchMyPermissions();
+
+                const response = await Auth.apiFetch(`/api/categories/${categoryId}`);
+                if (!response.ok) {
+                    const msg = await Categories.errorMessage(response, "Could not load the category.");
+                    Categories.showBanner(banner, msg, "error");
+                    detailEl.innerHTML = "";
+                    return;
+                }
+                const category = await response.json();
+
+                document.getElementById("page-title").textContent = category.name;
+
+                detailEl.innerHTML = [
+                    field("Name", Categories.escapeHtml(category.name)),
+                    field("Slug", Categories.escapeHtml(category.slug)),
+                    field("Products", String(category.product_count)),
+                    field("Created", Categories.formatDate(category.created_at)),
+                ].join("");
+
+                if (myPermissions.has("categories.update")) {
+                    const editBtn = document.getElementById("edit-btn");
+                    editBtn.href = `/categories/${categoryId}/edit`;
+                    editBtn.style.display = "";
+                }
+                if (myPermissions.has("categories.delete")) {
+                    document.getElementById("delete-btn").style.display = "";
+                }
+
+                if (myPermissions.has("products.read")) {
+                    loadProducts();
+                }
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        async function loadProducts() {
+            const panel = document.getElementById("products-panel");
+            const rowsEl = document.getElementById("products-rows");
+            panel.style.display = "";
+            try {
+                const response = await Auth.apiFetch(`/api/products?category_id=${categoryId}&page_size=50`);
+                if (!response.ok) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="5">Could not load products.</td></tr>';
+                    return;
+                }
+                const data = await response.json();
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="5">No products in this category yet.</td></tr>';
+                    return;
+                }
+                rowsEl.innerHTML = data.items.map((product) => `<tr>
+                    <td>${Categories.escapeHtml(product.sku)}</td>
+                    <td><a href="/products/${product.id}">${Categories.escapeHtml(product.name)}</a></td>
+                    <td>$${Number(product.price).toFixed(2)}</td>
+                    <td>${product.stock_quantity}</td>
+                    <td><span class="badge ${product.is_active ? "active" : "inactive"}">${product.is_active ? "Active" : "Inactive"}</span></td>
+                </tr>`).join("");
+            } catch (err) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="5">Could not load products.</td></tr>';
+            }
+        }
+
+        document.getElementById("delete-btn").addEventListener("click", async () => {
+            const ok = window.confirm("Delete this category? This cannot be undone.");
+            if (!ok) return;
+
+            const button = document.getElementById("delete-btn");
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/categories/${categoryId}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Categories.errorMessage(response, "Could not delete the category.");
+                    Categories.showBanner(banner, msg, "error");
+                    button.disabled = false;
+                    return;
+                }
+                window.location.href = "/categories";
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        loadCategory();
+    </script>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories" class="active">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Categories</h1>
+            <!-- Hidden until we confirm the viewer has categories.create. -->
+            <a id="new-category-btn" href="/categories/new" class="btn small" style="display:none">
+                + New category
+            </a>
+        </div>
+
+        <div class="panel">
+            <div class="toolbar">
+                <label class="field">
+                    <span>Search</span>
+                    <input id="f-search" type="text" placeholder="Name or slug…" />
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="name">Name</th>
+                            <th class="sortable" data-sort="slug">Slug</th>
+                            <th class="sortable" data-sort="created_at">Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows">
+                        <tr class="state-row"><td colspan="4">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <span id="page-info">—</span>
+                <div class="pages">
+                    <button id="prev-btn" class="btn small secondary" disabled>Previous</button>
+                    <button id="next-btn" class="btn small secondary" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/categories.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const state = {
+            search: "",
+            sort: "created_at",
+            order: "desc",
+            page: 1,
+            page_size: 20,
+        };
+
+        let myPermissions = new Set();
+
+        const rowsEl = document.getElementById("rows");
+        const pageInfoEl = document.getElementById("page-info");
+
+        function buildQuery() {
+            const params = new URLSearchParams();
+            if (state.search) params.set("search", state.search);
+            params.set("sort", state.sort);
+            params.set("order", state.order);
+            params.set("page", state.page);
+            params.set("page_size", state.page_size);
+            return params.toString();
+        }
+
+        function renderRow(category) {
+            const actions = [];
+            actions.push(`<a href="/categories/${category.id}">View</a>`);
+
+            if (myPermissions.has("categories.update")) {
+                actions.push(`<a href="/categories/${category.id}/edit">Edit</a>`);
+            }
+            if (myPermissions.has("categories.delete")) {
+                actions.push(`<button class="danger" data-action="delete" data-id="${category.id}" data-name="${Categories.escapeHtml(category.name)}">Delete</button>`);
+            }
+
+            return `<tr>
+                <td>${Categories.escapeHtml(category.name)}</td>
+                <td>${Categories.escapeHtml(category.slug)}</td>
+                <td>${Categories.formatDate(category.created_at)}</td>
+                <td><div class="row-actions">${actions.join("")}</div></td>
+            </tr>`;
+        }
+
+        async function loadCategories() {
+            rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">Loading…</td></tr>';
+            try {
+                const response = await Auth.apiFetch(`/api/categories?${buildQuery()}`);
+                if (!response.ok) {
+                    const msg = await Categories.errorMessage(response, "Could not load categories.");
+                    rowsEl.innerHTML = `<tr class="state-row"><td colspan="4">${Categories.escapeHtml(msg)}</td></tr>`;
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">No categories match your filters.</td></tr>';
+                } else {
+                    rowsEl.innerHTML = data.items.map(renderRow).join("");
+                }
+
+                const shownPages = data.total_pages || 1;
+                pageInfoEl.textContent =
+                    `Page ${data.page} of ${shownPages} · ${data.total} categorie(s)`;
+                document.getElementById("prev-btn").disabled = data.page <= 1;
+                document.getElementById("next-btn").disabled = data.page >= shownPages;
+            } catch (err) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">Could not load categories.</td></tr>';
+            }
+        }
+
+        rowsEl.addEventListener("click", async (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            const { action, id, name } = button.dataset;
+
+            if (action === "delete") {
+                const ok = window.confirm(`Delete ${name}? This cannot be undone.`);
+                if (!ok) return;
+            }
+
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/categories/${id}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Categories.errorMessage(response, "Action failed.");
+                    window.alert(msg);
+                    button.disabled = false;
+                    return;
+                }
+                loadCategories();
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        let searchTimer = null;
+        document.getElementById("f-search").addEventListener("input", (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.search = e.target.value.trim();
+                state.page = 1;
+                loadCategories();
+            }, 300);
+        });
+
+        document.querySelectorAll("th.sortable").forEach((th) => {
+            th.addEventListener("click", () => {
+                const column = th.dataset.sort;
+                if (state.sort === column) {
+                    state.order = state.order === "asc" ? "desc" : "asc";
+                } else {
+                    state.sort = column;
+                    state.order = "desc";
+                }
+                state.page = 1;
+                loadCategories();
+            });
+        });
+
+        document.getElementById("prev-btn").addEventListener("click", () => {
+            if (state.page > 1) { state.page -= 1; loadCategories(); }
+        });
+        document.getElementById("next-btn").addEventListener("click", () => {
+            state.page += 1; loadCategories();
+        });
+
+        async function init() {
+            myPermissions = await Categories.fetchMyPermissions();
+            if (myPermissions.has("categories.create")) {
+                document.getElementById("new-category-btn").style.display = "";
+            }
+            await loadCategories();
+        }
+        init();
+    </script>
+</body>
+</html>

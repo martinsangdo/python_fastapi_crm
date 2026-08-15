@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders" class="active">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1 id="page-title">Order detail</h1>
+            <div class="page-actions">
+                <a href="/orders" class="btn small secondary">Back to list</a>
+                <a id="edit-btn" href="#" class="btn small" style="display:none">Edit</a>
+                <button id="delete-btn" class="btn small danger" style="display:none">Delete</button>
+            </div>
+        </div>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="panel">
+            <dl id="detail" class="detail-grid">
+                <div class="state-row"><dd>Loading…</dd></div>
+            </dl>
+
+            <!-- Move the order forward (or cancel it). Only legal next
+                 statuses are offered — the API re-validates regardless. -->
+            <div id="status-control" class="form-actions" style="display:none">
+                <select id="status-select"></select>
+                <button id="status-btn" class="btn small">Update status</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Line items</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Product</th>
+                            <th>Quantity</th>
+                            <th>Unit price</th>
+                            <th>Line total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-rows">
+                        <tr class="state-row"><td colspan="5">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/orders.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const orderId = "{{ order_id }}";
+        const detailEl = document.getElementById("detail");
+        const banner = document.getElementById("banner");
+        let currentOrder = null;
+
+        // Mirrors the lifecycle enforced server-side in service/orders_service.py.
+        const FORWARD_TRANSITIONS = { pending: "paid", paid: "shipped", shipped: "completed" };
+        const CANCELLABLE_FROM = new Set(["pending", "paid", "shipped"]);
+
+        function field(label, valueHtml) {
+            return `<div><dt>${Orders.escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+        }
+
+        function statusBadge(status) {
+            const label = status.charAt(0).toUpperCase() + status.slice(1);
+            return `<span class="badge ${Orders.escapeHtml(status)}">${label}</span>`;
+        }
+
+        function nextStatusOptions(status) {
+            const options = [];
+            if (FORWARD_TRANSITIONS[status]) options.push(FORWARD_TRANSITIONS[status]);
+            if (CANCELLABLE_FROM.has(status)) options.push("cancelled");
+            return options;
+        }
+
+        function renderItems(items) {
+            const rowsEl = document.getElementById("items-rows");
+            if (items.length === 0) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="5">No line items.</td></tr>';
+                return;
+            }
+            rowsEl.innerHTML = items.map((item) => `<tr>
+                <td>${Orders.escapeHtml(item.product.sku)}</td>
+                <td><a href="/products/${item.product.id}">${Orders.escapeHtml(item.product.name)}</a></td>
+                <td>${item.quantity}</td>
+                <td>${Orders.formatMoney(item.unit_price)}</td>
+                <td>${Orders.formatMoney(item.line_total)}</td>
+            </tr>`).join("");
+        }
+
+        async function loadOrder() {
+            let myPermissions = new Set();
+            try {
+                myPermissions = await Orders.fetchMyPermissions();
+
+                const response = await Auth.apiFetch(`/api/orders/${orderId}`);
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not load the order.");
+                    Orders.showBanner(banner, msg, "error");
+                    detailEl.innerHTML = "";
+                    return;
+                }
+                currentOrder = await response.json();
+
+                document.getElementById("page-title").textContent = `Order #${currentOrder.id}`;
+
+                const addressHtml = currentOrder.shipping_address
+                    ? `${Orders.escapeHtml(currentOrder.shipping_address.line1)}, ${Orders.escapeHtml(currentOrder.shipping_address.city)}, ${Orders.escapeHtml(currentOrder.shipping_address.country)}`
+                    : '<span style="color:var(--muted)">None</span>';
+
+                detailEl.innerHTML = [
+                    field("Customer", `<a href="/customers/${currentOrder.customer.id}">${Orders.escapeHtml(currentOrder.customer.full_name)}</a> &lt;${Orders.escapeHtml(currentOrder.customer.email)}&gt;`),
+                    field("Status", statusBadge(currentOrder.status)),
+                    field("Shipping address", addressHtml),
+                    field("Total", Orders.formatMoney(currentOrder.total_amount)),
+                    field("Placed", Orders.formatDate(currentOrder.placed_at)),
+                ].join("");
+
+                renderItems(currentOrder.items);
+
+                if (currentOrder.status === "pending" && myPermissions.has("orders.update")) {
+                    const editBtn = document.getElementById("edit-btn");
+                    editBtn.href = `/orders/${orderId}/edit`;
+                    editBtn.style.display = "";
+                }
+                if ((currentOrder.status === "pending" || currentOrder.status === "cancelled") && myPermissions.has("orders.delete")) {
+                    document.getElementById("delete-btn").style.display = "";
+                }
+
+                if (myPermissions.has("orders.update")) {
+                    const options = nextStatusOptions(currentOrder.status);
+                    if (options.length > 0) {
+                        const select = document.getElementById("status-select");
+                        select.innerHTML = options.map((s) => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join("");
+                        document.getElementById("status-control").style.display = "";
+                    }
+                }
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        document.getElementById("status-btn").addEventListener("click", async () => {
+            const newStatus = document.getElementById("status-select").value;
+            const button = document.getElementById("status-btn");
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/orders/${orderId}/status`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: newStatus }),
+                });
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not update status.");
+                    Orders.showBanner(banner, msg, "error");
+                    button.disabled = false;
+                    return;
+                }
+                await loadOrder();
+                Orders.showBanner(banner, "Status updated.", "success");
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        document.getElementById("delete-btn").addEventListener("click", async () => {
+            const ok = window.confirm("Delete this order? This cannot be undone.");
+            if (!ok) return;
+
+            const button = document.getElementById("delete-btn");
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/orders/${orderId}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not delete the order.");
+                    Orders.showBanner(banner, msg, "error");
+                    button.disabled = false;
+                    return;
+                }
+                window.location.href = "/orders";
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        loadOrder();
+    </script>
+</body>
+</html>

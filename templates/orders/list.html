@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders" class="active">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Orders</h1>
+            <!-- Hidden until we confirm the viewer has orders.create. -->
+            <a id="new-order-btn" href="/orders/new" class="btn small" style="display:none">
+                + New order
+            </a>
+        </div>
+
+        <div class="panel">
+            <div class="toolbar">
+                <label class="field">
+                    <span>Search</span>
+                    <input id="f-search" type="text" placeholder="Order #, customer name or email…" />
+                </label>
+                <label class="field">
+                    <span>Status</span>
+                    <select id="f-status">
+                        <option value="">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="paid">Paid</option>
+                        <option value="shipped">Shipped</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>From</span>
+                    <input id="f-date-from" type="date" />
+                </label>
+                <label class="field">
+                    <span>To</span>
+                    <input id="f-date-to" type="date" />
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th class="sortable" data-sort="status">Status</th>
+                            <th>Items</th>
+                            <th class="sortable" data-sort="total_amount">Total</th>
+                            <th class="sortable" data-sort="placed_at">Placed</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows">
+                        <tr class="state-row"><td colspan="7">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <span id="page-info">—</span>
+                <div class="pages">
+                    <button id="prev-btn" class="btn small secondary" disabled>Previous</button>
+                    <button id="next-btn" class="btn small secondary" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/orders.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const state = {
+            search: "",
+            status: "",
+            date_from: "",
+            date_to: "",
+            sort: "placed_at",
+            order: "desc",
+            page: 1,
+            page_size: 20,
+        };
+
+        let myPermissions = new Set();
+
+        const rowsEl = document.getElementById("rows");
+        const pageInfoEl = document.getElementById("page-info");
+
+        function buildQuery() {
+            const params = new URLSearchParams();
+            if (state.search) params.set("search", state.search);
+            if (state.status) params.set("status", state.status);
+            if (state.date_from) params.set("date_from", state.date_from);
+            if (state.date_to) params.set("date_to", state.date_to);
+            params.set("sort", state.sort);
+            params.set("order", state.order);
+            params.set("page", state.page);
+            params.set("page_size", state.page_size);
+            return params.toString();
+        }
+
+        function statusBadge(status) {
+            const label = status.charAt(0).toUpperCase() + status.slice(1);
+            return `<span class="badge ${Orders.escapeHtml(status)}">${label}</span>`;
+        }
+
+        function renderRow(order) {
+            const actions = [];
+            actions.push(`<a href="/orders/${order.id}">View</a>`);
+
+            if (order.status === "pending" && myPermissions.has("orders.update")) {
+                actions.push(`<a href="/orders/${order.id}/edit">Edit</a>`);
+            }
+            if ((order.status === "pending" || order.status === "cancelled") && myPermissions.has("orders.delete")) {
+                actions.push(`<button class="danger" data-action="delete" data-id="${order.id}">Delete</button>`);
+            }
+
+            return `<tr>
+                <td><a href="/orders/${order.id}">#${order.id}</a></td>
+                <td>${Orders.escapeHtml(order.customer_name)}</td>
+                <td>${statusBadge(order.status)}</td>
+                <td>${order.item_count}</td>
+                <td>${Orders.formatMoney(order.total_amount)}</td>
+                <td>${Orders.formatDate(order.placed_at)}</td>
+                <td><div class="row-actions">${actions.join("")}</div></td>
+            </tr>`;
+        }
+
+        async function loadOrders() {
+            rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">Loading…</td></tr>';
+            try {
+                const response = await Auth.apiFetch(`/api/orders?${buildQuery()}`);
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not load orders.");
+                    rowsEl.innerHTML = `<tr class="state-row"><td colspan="7">${Orders.escapeHtml(msg)}</td></tr>`;
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">No orders match your filters.</td></tr>';
+                } else {
+                    rowsEl.innerHTML = data.items.map(renderRow).join("");
+                }
+
+                const shownPages = data.total_pages || 1;
+                pageInfoEl.textContent =
+                    `Page ${data.page} of ${shownPages} · ${data.total} order(s)`;
+                document.getElementById("prev-btn").disabled = data.page <= 1;
+                document.getElementById("next-btn").disabled = data.page >= shownPages;
+            } catch (err) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="7">Could not load orders.</td></tr>';
+            }
+        }
+
+        rowsEl.addEventListener("click", async (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            const { action, id } = button.dataset;
+
+            if (action === "delete") {
+                const ok = window.confirm(`Delete order #${id}? This cannot be undone.`);
+                if (!ok) return;
+            }
+
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/orders/${id}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Action failed.");
+                    window.alert(msg);
+                    button.disabled = false;
+                    return;
+                }
+                loadOrders();
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        let searchTimer = null;
+        document.getElementById("f-search").addEventListener("input", (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.search = e.target.value.trim();
+                state.page = 1;
+                loadOrders();
+            }, 300);
+        });
+
+        document.getElementById("f-status").addEventListener("change", (e) => {
+            state.status = e.target.value;
+            state.page = 1;
+            loadOrders();
+        });
+
+        document.getElementById("f-date-from").addEventListener("change", (e) => {
+            state.date_from = e.target.value;
+            state.page = 1;
+            loadOrders();
+        });
+
+        document.getElementById("f-date-to").addEventListener("change", (e) => {
+            state.date_to = e.target.value;
+            state.page = 1;
+            loadOrders();
+        });
+
+        document.querySelectorAll("th.sortable").forEach((th) => {
+            th.addEventListener("click", () => {
+                const column = th.dataset.sort;
+                if (state.sort === column) {
+                    state.order = state.order === "asc" ? "desc" : "asc";
+                } else {
+                    state.sort = column;
+                    state.order = "desc";
+                }
+                state.page = 1;
+                loadOrders();
+            });
+        });
+
+        document.getElementById("prev-btn").addEventListener("click", () => {
+            if (state.page > 1) { state.page -= 1; loadOrders(); }
+        });
+        document.getElementById("next-btn").addEventListener("click", () => {
+            state.page += 1; loadOrders();
+        });
+
+        async function init() {
+            myPermissions = await Orders.fetchMyPermissions();
+            if (myPermissions.has("orders.create")) {
+                document.getElementById("new-order-btn").style.display = "";
+            }
+            await loadOrders();
+        }
+        init();
+    </script>
+</body>
+</html>

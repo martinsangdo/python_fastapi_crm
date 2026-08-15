@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders" class="active">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>New order</h1>
+            <a href="/orders" class="btn small secondary">Back to list</a>
+        </div>
+
+        <div class="panel">
+            <form id="create-form" class="admin-form order-form">
+                <div id="banner" class="banner"></div>
+
+                <label class="field">
+                    <span>Customer</span>
+                    <select name="customer_id" required>
+                        <option value="" disabled selected>Choose a customer…</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Shipping address</span>
+                    <select name="shipping_address_id">
+                        <option value="">No shipping address</option>
+                    </select>
+                </label>
+
+                <div class="field">
+                    <span>Line items</span>
+                    <div class="table-wrap">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Quantity</th>
+                                    <th>Unit price</th>
+                                    <th>Line total</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="items-rows"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="add-item-btn" class="btn small secondary">+ Add line</button>
+                </div>
+
+                <div class="order-total">Total: <strong id="total-preview">$0.00</strong></div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn">Create order</button>
+                    <a href="/orders" class="btn secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/orders.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const form = document.getElementById("create-form");
+        const banner = document.getElementById("banner");
+        const itemsRowsEl = document.getElementById("items-rows");
+        const totalPreviewEl = document.getElementById("total-preview");
+
+        // Loaded once: only active products can be added to a new order.
+        let activeProducts = [];
+
+        function productOptionsHtml(selectedId) {
+            return activeProducts.map((p) => {
+                const selected = String(p.id) === String(selectedId) ? "selected" : "";
+                return `<option value="${p.id}" ${selected}>${Orders.escapeHtml(p.sku)} — ${Orders.escapeHtml(p.name)} (${Orders.formatMoney(p.price)}, ${p.stock_quantity} in stock)</option>`;
+            }).join("");
+        }
+
+        function recomputeTotal() {
+            let total = 0;
+            itemsRowsEl.querySelectorAll("tr").forEach((row) => {
+                const productId = row.querySelector(".item-product").value;
+                const qty = Number(row.querySelector(".item-qty").value) || 0;
+                const product = activeProducts.find((p) => String(p.id) === String(productId));
+                const price = product ? Number(product.price) : 0;
+                const lineTotal = price * qty;
+                row.querySelector(".item-unit-price").textContent = product ? Orders.formatMoney(price) : "—";
+                row.querySelector(".item-line-total").textContent = product ? Orders.formatMoney(lineTotal) : "—";
+                total += lineTotal;
+            });
+            totalPreviewEl.textContent = Orders.formatMoney(total);
+        }
+
+        function addRow() {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td><select class="item-product">${productOptionsHtml()}</select></td>
+                <td><input type="number" class="item-qty" min="1" step="1" value="1" /></td>
+                <td class="item-unit-price">—</td>
+                <td class="item-line-total">—</td>
+                <td><button type="button" class="danger remove-row">Remove</button></td>
+            `;
+            itemsRowsEl.appendChild(row);
+            row.querySelector(".item-product").addEventListener("change", recomputeTotal);
+            row.querySelector(".item-qty").addEventListener("input", recomputeTotal);
+            row.querySelector(".remove-row").addEventListener("click", () => {
+                row.remove();
+                recomputeTotal();
+            });
+            recomputeTotal();
+        }
+
+        document.getElementById("add-item-btn").addEventListener("click", addRow);
+
+        async function loadCustomers() {
+            try {
+                const response = await Auth.apiFetch("/api/customers?page_size=100&sort=full_name&order=asc");
+                if (!response.ok) return;
+                const data = await response.json();
+                for (const customer of data.items) {
+                    const opt = document.createElement("option");
+                    opt.value = customer.id;
+                    opt.textContent = `${customer.full_name} <${customer.email}>`;
+                    form.customer_id.appendChild(opt);
+                }
+            } catch (err) { /* dropdown stays with just the placeholder */ }
+        }
+
+        async function loadActiveProducts() {
+            try {
+                const response = await Auth.apiFetch("/api/products?is_active=true&page_size=100&sort=name&order=asc");
+                if (!response.ok) return;
+                const data = await response.json();
+                activeProducts = data.items;
+            } catch (err) { /* no products to pick — the row selects stay empty */ }
+        }
+
+        async function loadShippingAddresses(customerId) {
+            const select = form.shipping_address_id;
+            select.innerHTML = '<option value="">No shipping address</option>';
+            if (!customerId) return;
+            try {
+                const response = await Auth.apiFetch(`/api/customers/${customerId}/addresses`);
+                if (!response.ok) return;
+                const addresses = await response.json();
+                for (const address of addresses) {
+                    const opt = document.createElement("option");
+                    opt.value = address.id;
+                    opt.textContent = `${address.line1}, ${address.city}${address.is_default ? " (default)" : ""}`;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "No shipping address" only */ }
+        }
+
+        form.customer_id.addEventListener("change", (e) => {
+            loadShippingAddresses(e.target.value);
+        });
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            Orders.hideBanner(banner);
+
+            const items = [];
+            itemsRowsEl.querySelectorAll("tr").forEach((row) => {
+                const productId = row.querySelector(".item-product").value;
+                const qty = Number(row.querySelector(".item-qty").value);
+                if (productId && qty > 0) {
+                    items.push({ product_id: Number(productId), quantity: qty });
+                }
+            });
+
+            if (!form.customer_id.value) {
+                Orders.showBanner(banner, "Please choose a customer.", "error");
+                return;
+            }
+            if (items.length === 0) {
+                Orders.showBanner(banner, "Add at least one line item.", "error");
+                return;
+            }
+
+            const submitBtn = form.querySelector("button[type=submit]");
+            submitBtn.disabled = true;
+
+            const payload = {
+                customer_id: Number(form.customer_id.value),
+                shipping_address_id: form.shipping_address_id.value ? Number(form.shipping_address_id.value) : null,
+                items,
+            };
+
+            try {
+                const response = await Auth.apiFetch("/api/orders", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const msg = await Orders.errorMessage(response, "Could not create order.");
+                    Orders.showBanner(banner, msg, "error");
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                const created = await response.json();
+                window.location.href = `/orders/${created.id}`;
+            } catch (err) {
+                submitBtn.disabled = false;
+            }
+        });
+
+        (async function init() {
+            await loadActiveProducts();
+            await loadCustomers();
+            addRow();
+        })();
+    </script>
+</body>
+</html>

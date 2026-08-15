@@ -26,7 +26,19 @@ if DATABASE_URL:
     )
 # The "engine" is the core connection to the database.
 # SQLAlchemy uses it to open and manage connections for us.
-engine = create_engine(DATABASE_URL)
+#
+# prepare_threshold=None turns off psycopg's server-side prepared statements.
+# Supabase's connection string above uses its "Transaction" pooler (port
+# 6543), which hands out a different physical Postgres connection per
+# transaction. A prepared statement created on one physical connection does
+# not exist on the next one, so psycopg's default auto-prepare-after-5-uses
+# behaviour causes random "prepared statement ... already exists" /
+# "does not exist" errors under normal use. Disabling it trades a little
+# per-query performance for connections that actually work through the pooler.
+# (Only psycopg accepts this option — the test suite points DATABASE_URL at
+# an in-memory SQLite database, whose driver has no such argument.)
+_connect_args = {"prepare_threshold": None} if DATABASE_URL and "psycopg" in DATABASE_URL else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 
 # A "session" is one conversation with the database.
 # We create a session factory here and make a new session per request later.

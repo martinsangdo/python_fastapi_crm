@@ -25,6 +25,12 @@
             <div class="divider"></div>
             <a id="customers-link" href="/customers" class="btn secondary"
                style="display:none">Manage customers</a>
+            <a id="categories-link" href="/categories" class="btn secondary"
+               style="display:none">Manage categories</a>
+            <a id="products-link" href="/products" class="btn secondary"
+               style="display:none">Manage products</a>
+            <a id="orders-link" href="/orders" class="btn secondary"
+               style="display:none">Manage orders</a>
             <a id="users-link" href="/admin/users" class="btn secondary"
                style="display:none">Manage users</a>
         </nav>
@@ -61,6 +67,18 @@
                 let anyShown = false;
                 if (permissions.includes("customers.read")) {
                     document.getElementById("customers-link").style.display = "";
+                    anyShown = true;
+                }
+                if (permissions.includes("categories.read")) {
+                    document.getElementById("categories-link").style.display = "";
+                    anyShown = true;
+                }
+                if (permissions.includes("products.read")) {
+                    document.getElementById("products-link").style.display = "";
+                    anyShown = true;
+                }
+                if (permissions.includes("orders.read")) {
+                    document.getElementById("orders-link").style.display = "";
                     anyShown = true;
                 }
                 if (permissions.includes("users.read")) {

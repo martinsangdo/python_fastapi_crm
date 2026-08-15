@@ -37,6 +37,13 @@ NAVIGATION_ITEMS: list[dict] = [
         "required_permission": "customers.read",
     },
     {
+        "module": "categories",
+        "menu_title": "Categories",
+        "route": "/categories",
+        "icon": "categories",
+        "required_permission": "categories.read",
+    },
+    {
         "module": "products",
         "menu_title": "Products",
         "route": "/products",

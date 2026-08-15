@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products" class="active">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Products</h1>
+            <!-- Hidden until we confirm the viewer has products.create. -->
+            <a id="new-product-btn" href="/products/new" class="btn small" style="display:none">
+                + New product
+            </a>
+        </div>
+
+        <div class="panel">
+            <div class="toolbar">
+                <label class="field">
+                    <span>Search</span>
+                    <input id="f-search" type="text" placeholder="Name or SKU…" />
+                </label>
+                <label class="field">
+                    <span>Category</span>
+                    <select id="f-category">
+                        <option value="">All categories</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Status</span>
+                    <select id="f-active">
+                        <option value="">All</option>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                </label>
+                <label class="field check-field">
+                    <input id="f-in-stock" type="checkbox" />
+                    <span>In stock only</span>
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th class="sortable" data-sort="name">Name</th>
+                            <th class="sortable" data-sort="price">Price</th>
+                            <th class="sortable" data-sort="stock_quantity">Stock</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows">
+                        <tr class="state-row"><td colspan="6">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <span id="page-info">—</span>
+                <div class="pages">
+                    <button id="prev-btn" class="btn small secondary" disabled>Previous</button>
+                    <button id="next-btn" class="btn small secondary" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/products.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const state = {
+            search: "",
+            category_id: "",
+            is_active: "",
+            in_stock: false,
+            sort: "created_at",
+            order: "desc",
+            page: 1,
+            page_size: 20,
+        };
+
+        let myPermissions = new Set();
+
+        const rowsEl = document.getElementById("rows");
+        const pageInfoEl = document.getElementById("page-info");
+
+        function buildQuery() {
+            const params = new URLSearchParams();
+            if (state.search) params.set("search", state.search);
+            if (state.category_id) params.set("category_id", state.category_id);
+            if (state.is_active) params.set("is_active", state.is_active);
+            if (state.in_stock) params.set("in_stock", "true");
+            params.set("sort", state.sort);
+            params.set("order", state.order);
+            params.set("page", state.page);
+            params.set("page_size", state.page_size);
+            return params.toString();
+        }
+
+        // A lookup from category id -> name, so the low-stock/inactive rows
+        // are readable without an extra join in the API response.
+        function statusBadge(isActive) {
+            return isActive
+                ? '<span class="badge active">Active</span>'
+                : '<span class="badge inactive">Inactive</span>';
+        }
+
+        function renderRow(product) {
+            const actions = [];
+            actions.push(`<a href="/products/${product.id}">View</a>`);
+
+            if (myPermissions.has("products.update")) {
+                actions.push(`<a href="/products/${product.id}/edit">Edit</a>`);
+                const toggleLabel = product.is_active ? "Deactivate" : "Activate";
+                actions.push(`<button data-action="toggle" data-id="${product.id}" data-active="${product.is_active}">${toggleLabel}</button>`);
+            }
+            if (myPermissions.has("products.delete")) {
+                actions.push(`<button class="danger" data-action="delete" data-id="${product.id}" data-name="${Products.escapeHtml(product.name)}">Delete</button>`);
+            }
+
+            const lowStock = product.stock_quantity <= 5;
+            const stockHtml = lowStock
+                ? `<span style="color:#b91c1c;font-weight:600">${product.stock_quantity}</span>`
+                : String(product.stock_quantity);
+
+            return `<tr>
+                <td>${Products.escapeHtml(product.sku)}</td>
+                <td>${Products.escapeHtml(product.name)}</td>
+                <td>${Products.formatMoney(product.price)}</td>
+                <td>${stockHtml}</td>
+                <td>${statusBadge(product.is_active)}</td>
+                <td><div class="row-actions">${actions.join("")}</div></td>
+            </tr>`;
+        }
+
+        async function loadProducts() {
+            rowsEl.innerHTML = '<tr class="state-row"><td colspan="6">Loading…</td></tr>';
+            try {
+                const response = await Auth.apiFetch(`/api/products?${buildQuery()}`);
+                if (!response.ok) {
+                    const msg = await Products.errorMessage(response, "Could not load products.");
+                    rowsEl.innerHTML = `<tr class="state-row"><td colspan="6">${Products.escapeHtml(msg)}</td></tr>`;
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="6">No products match your filters.</td></tr>';
+                } else {
+                    rowsEl.innerHTML = data.items.map(renderRow).join("");
+                }
+
+                const shownPages = data.total_pages || 1;
+                pageInfoEl.textContent =
+                    `Page ${data.page} of ${shownPages} · ${data.total} product(s)`;
+                document.getElementById("prev-btn").disabled = data.page <= 1;
+                document.getElementById("next-btn").disabled = data.page >= shownPages;
+            } catch (err) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="6">Could not load products.</td></tr>';
+            }
+        }
+
+        async function loadCategories() {
+            try {
+                const response = await Auth.apiFetch("/api/categories?page_size=100&sort=name&order=asc");
+                if (!response.ok) return;
+                const data = await response.json();
+                const select = document.getElementById("f-category");
+                for (const category of data.items) {
+                    const opt = document.createElement("option");
+                    opt.value = category.id;
+                    opt.textContent = category.name;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "All categories" only */ }
+        }
+
+        rowsEl.addEventListener("click", async (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            const { action, id, name, active } = button.dataset;
+
+            if (action === "delete") {
+                const ok = window.confirm(`Delete ${name}? This cannot be undone.`);
+                if (!ok) return;
+            }
+
+            button.disabled = true;
+            try {
+                let response;
+                if (action === "delete") {
+                    response = await Auth.apiFetch(`/api/products/${id}`, { method: "DELETE" });
+                } else {
+                    const endpoint = active === "true" ? "deactivate" : "activate";
+                    response = await Auth.apiFetch(`/api/products/${id}/${endpoint}`, { method: "POST" });
+                }
+                if (!response.ok) {
+                    const msg = await Products.errorMessage(response, "Action failed.");
+                    window.alert(msg);
+                    button.disabled = false;
+                    return;
+                }
+                loadProducts();
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        let searchTimer = null;
+        document.getElementById("f-search").addEventListener("input", (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.search = e.target.value.trim();
+                state.page = 1;
+                loadProducts();
+            }, 300);
+        });
+
+        document.getElementById("f-category").addEventListener("change", (e) => {
+            state.category_id = e.target.value;
+            state.page = 1;
+            loadProducts();
+        });
+
+        document.getElementById("f-active").addEventListener("change", (e) => {
+            state.is_active = e.target.value;
+            state.page = 1;
+            loadProducts();
+        });
+
+        document.getElementById("f-in-stock").addEventListener("change", (e) => {
+            state.in_stock = e.target.checked;
+            state.page = 1;
+            loadProducts();
+        });
+
+        document.querySelectorAll("th.sortable").forEach((th) => {
+            th.addEventListener("click", () => {
+                const column = th.dataset.sort;
+                if (state.sort === column) {
+                    state.order = state.order === "asc" ? "desc" : "asc";
+                } else {
+                    state.sort = column;
+                    state.order = "desc";
+                }
+                state.page = 1;
+                loadProducts();
+            });
+        });
+
+        document.getElementById("prev-btn").addEventListener("click", () => {
+            if (state.page > 1) { state.page -= 1; loadProducts(); }
+        });
+        document.getElementById("next-btn").addEventListener("click", () => {
+            state.page += 1; loadProducts();
+        });
+
+        async function init() {
+            myPermissions = await Products.fetchMyPermissions();
+            if (myPermissions.has("products.create")) {
+                document.getElementById("new-product-btn").style.display = "";
+            }
+            await loadCategories();
+            await loadProducts();
+        }
+        init();
+    </script>
+</body>
+</html>

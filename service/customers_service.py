@@ -3,19 +3,15 @@ customers_service.py
 ---------------------
 The "business logic" of the Customers module.
 
-These functions enforce the module's RULES (required name, allowed statuses,
-owner defaulting, ...) and talk to the database through
-customers_repository.py. They know NOTHING about HTTP — instead they raise
-clear, typed errors that the router turns into the right status code.
-
-Two error types keep that mapping simple and readable (the same pattern as
-users_service.py):
+These functions enforce the module's RULES (required name, unique email,
+delete blocked while orders still reference the customer) and talk to the
+database through customers_repository.py. They know NOTHING about HTTP —
+instead they raise clear, typed errors that the router turns into the right
+status code (the same pattern as users_service.py):
   * NotFoundError      -> the router returns 404
-  * BusinessRuleError  -> the router returns 400 (e.g. an unknown owner)
-
-Note: the spec's delete guard ("block deleting a customer that has orders")
-only applies once the Orders module exists. There is no Order model yet, so
-deletion is unconditionally allowed for now — see docs/02_customers_module_prompt.txt §6.
+  * BusinessRuleError  -> the router returns 400 (e.g. an empty name)
+  * ConflictError      -> the router returns 409 (duplicate email, or a
+                           delete blocked by existing orders)
 """
 
 from typing import Optional
@@ -23,9 +19,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 import repository.customers_repository as repo
-import repository.users_repository as users_repo
-from models import Customer, User
-from schemas.customers_schemas import CustomerCreate, CustomerDetail, CustomerUpdate, OwnerSummary
+from models import Customer
+from schemas.customers_schemas import CustomerCreate, CustomerDetail, CustomerUpdate
 
 
 # ---------------------------------------------------------------------------
@@ -33,11 +28,15 @@ from schemas.customers_schemas import CustomerCreate, CustomerDetail, CustomerUp
 # ---------------------------------------------------------------------------
 
 class NotFoundError(Exception):
-    """Raised when the requested customer (or owner) does not exist."""
+    """Raised when the requested customer does not exist."""
 
 
 class BusinessRuleError(Exception):
     """Raised when a request is understood but breaks a module rule."""
+
+
+class ConflictError(Exception):
+    """Raised on a duplicate email, or deleting a customer with orders."""
 
 
 # ---------------------------------------------------------------------------
@@ -45,29 +44,13 @@ class BusinessRuleError(Exception):
 # ---------------------------------------------------------------------------
 
 def to_detail(customer: Customer) -> CustomerDetail:
-    """Build the full detail view of a customer, including its owner summary."""
-    owner = OwnerSummary.model_validate(customer.owner) if customer.owner is not None else None
+    """Build the full detail view of a customer."""
     return CustomerDetail(
         id=customer.id,
-        name=customer.name,
         email=customer.email,
-        phone=customer.phone,
-        company=customer.company,
-        status=customer.status,
-        address_line=customer.address_line,
-        city=customer.city,
-        country=customer.country,
-        notes=customer.notes,
-        owner=owner,
+        full_name=customer.full_name,
         created_at=customer.created_at,
-        updated_at=customer.updated_at,
     )
-
-
-def _resolve_owner(db: Session, owner_id) -> None:
-    """Raise NotFoundError if a (non-null) owner_id does not point at a real user."""
-    if owner_id is not None and users_repo.get_user(db, owner_id) is None:
-        raise NotFoundError("The selected owner does not exist.")
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +69,6 @@ def list_customers(
     db: Session,
     *,
     search: Optional[str],
-    status: Optional[str],
-    owner_id,
     sort: str,
     order: str,
     page: int,
@@ -95,50 +76,37 @@ def list_customers(
 ):
     """Return (rows, total) for a page of customers. Filtering lives in the repo."""
     return repo.list_customers(
-        db,
-        search=search,
-        status=status,
-        owner_id=owner_id,
-        sort=sort,
-        order=order,
-        page=page,
-        page_size=page_size,
+        db, search=search, sort=sort, order=order, page=page, page_size=page_size
     )
+
+
+def list_addresses(db: Session, customer_id):
+    """A customer's saved shipping addresses (used by the Orders module)."""
+    get_customer_or_404(db, customer_id)
+    return repo.list_addresses(db, customer_id)
 
 
 # ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------
 
-def create_customer(db: Session, actor: User, data: CustomerCreate) -> Customer:
+def create_customer(db: Session, data: CustomerCreate) -> Customer:
     """
-    Create a customer on behalf of the logged-in user.
+    Create a customer.
 
-    The name is trimmed and must be non-empty (Pydantic's min_length already
-    rejects an empty string, but a whitespace-only one would slip through).
-    The email, if given, is lowercased. The owner defaults to the creating
-    user when none is given.
+    The full name is trimmed and must be non-empty (Pydantic's min_length
+    already rejects an empty string, but a whitespace-only one would slip
+    through). The email is lowercased and must be unique.
     """
-    name = data.name.strip()
-    if not name:
-        raise BusinessRuleError("Name is required.")
+    full_name = data.full_name.strip()
+    if not full_name:
+        raise BusinessRuleError("Full name is required.")
 
-    owner_id = data.owner_id if data.owner_id is not None else actor.id
-    _resolve_owner(db, owner_id)
+    email = data.email.lower()
+    if repo.get_customer_by_email(db, email) is not None:
+        raise ConflictError(f"A customer with email '{email}' already exists.")
 
-    customer = Customer(
-        name=name,
-        email=data.email.lower() if data.email else None,
-        phone=data.phone,
-        company=data.company,
-        status=data.status,
-        address_line=data.address_line,
-        city=data.city,
-        country=data.country,
-        notes=data.notes,
-        owner_id=owner_id,
-        created_by=actor.id,
-    )
+    customer = Customer(email=email, full_name=full_name)
     return repo.add_customer(db, customer)
 
 
@@ -150,31 +118,25 @@ def update_customer(db: Session, customer_id, data: CustomerUpdate) -> Customer:
     """
     Apply a partial update to a customer.
 
-    Only the fields actually sent are touched (Pydantic's exclude_unset), so
-    e.g. leaving `owner_id` out keeps the current owner, while sending
-    `owner_id: null` clears it.
+    Only the fields actually sent are touched (Pydantic's exclude_unset). If
+    the email changes, uniqueness is re-checked.
     """
     customer = get_customer_or_404(db, customer_id)
     changes = data.model_dump(exclude_unset=True)
 
-    if "name" in changes:
-        name = (changes["name"] or "").strip()
-        if not name:
-            raise BusinessRuleError("Name is required.")
-        customer.name = name
-
-    if "owner_id" in changes:
-        _resolve_owner(db, changes["owner_id"])
-        customer.owner_id = changes["owner_id"]
+    if "full_name" in changes:
+        full_name = (changes["full_name"] or "").strip()
+        if not full_name:
+            raise BusinessRuleError("Full name is required.")
+        customer.full_name = full_name
 
     if "email" in changes:
-        customer.email = changes["email"].lower() if changes["email"] else None
-
-    for field in (
-        "phone", "company", "status", "address_line", "city", "country", "notes",
-    ):
-        if field in changes:
-            setattr(customer, field, changes[field])
+        email = (changes["email"] or "").lower()
+        if not email:
+            raise BusinessRuleError("Email is required.")
+        if email != customer.email and repo.get_customer_by_email(db, email) is not None:
+            raise ConflictError(f"A customer with email '{email}' already exists.")
+        customer.email = email
 
     return repo.save(db, customer)
 
@@ -187,8 +149,13 @@ def delete_customer(db: Session, customer_id) -> None:
     """
     Permanently remove a customer.
 
-    No dependent-orders guard yet: the Orders module does not exist in this
-    scaffold, so there is nothing to block deletion on (see module docstring).
+    Blocked (409) while any order still references it — matches the
+    database's own ON DELETE RESTRICT foreign key.
     """
     customer = get_customer_or_404(db, customer_id)
+    in_use = repo.count_orders(db, customer_id)
+    if in_use > 0:
+        raise ConflictError(
+            f"Cannot delete '{customer.full_name}': {in_use} order(s) still reference this customer."
+        )
     repo.delete_customer(db, customer)

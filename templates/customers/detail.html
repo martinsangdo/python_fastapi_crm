@@ -12,6 +12,10 @@
         <nav class="topnav">
             <a href="/dashboard">Dashboard</a>
             <a href="/customers" class="active">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
         </nav>
         <button id="logout-btn" class="btn small secondary">Log out</button>
     </header>
@@ -35,6 +39,26 @@
                 <div class="state-row"><dd>Loading…</dd></div>
             </dl>
         </div>
+
+        <!-- This customer's orders, if the viewer can see them. -->
+        <div class="panel" id="orders-panel" style="display:none">
+            <h2>Orders</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Status</th>
+                            <th>Total</th>
+                            <th>Placed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-rows">
+                        <tr class="state-row"><td colspan="4">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </main>
 
     <script src="/static/auth.js"></script>
@@ -51,11 +75,6 @@
             return `<div><dt>${Customers.escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
         }
 
-        function statusBadge(status) {
-            const label = status.charAt(0).toUpperCase() + status.slice(1);
-            return `<span class="badge ${Customers.escapeHtml(status)}">${label}</span>`;
-        }
-
         async function loadCustomer() {
             let myPermissions = new Set();
             try {
@@ -70,27 +89,12 @@
                 }
                 const customer = await response.json();
 
-                document.getElementById("page-title").textContent = customer.name;
-
-                const ownerHtml = customer.owner
-                    ? Customers.escapeHtml(customer.owner.full_name)
-                    : '<span style="color:var(--muted)">Unassigned</span>';
+                document.getElementById("page-title").textContent = customer.full_name;
 
                 detailEl.innerHTML = [
-                    field("Name", Customers.escapeHtml(customer.name)),
-                    field("Status", statusBadge(customer.status)),
-                    field("Email", Customers.escapeHtml(customer.email) || "—"),
-                    field("Phone", Customers.escapeHtml(customer.phone) || "—"),
-                    field("Company", Customers.escapeHtml(customer.company) || "—"),
-                    field("Owner", ownerHtml),
-                    field("Address", Customers.escapeHtml(customer.address_line) || "—"),
-                    field("City", Customers.escapeHtml(customer.city) || "—"),
-                    field("Country", Customers.escapeHtml(customer.country) || "—"),
-                    field("Notes", customer.notes
-                        ? Customers.escapeHtml(customer.notes).replaceAll("\n", "<br>")
-                        : "—"),
+                    field("Full name", Customers.escapeHtml(customer.full_name)),
+                    field("Email", Customers.escapeHtml(customer.email)),
                     field("Created", Customers.formatDate(customer.created_at)),
-                    field("Updated", Customers.formatDate(customer.updated_at)),
                 ].join("");
 
                 // Show Edit / Delete only to viewers who hold the permission.
@@ -102,7 +106,39 @@
                 if (myPermissions.has("customers.delete")) {
                     document.getElementById("delete-btn").style.display = "";
                 }
+
+                if (myPermissions.has("orders.read")) {
+                    loadOrders();
+                }
             } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        // A small, read-only table of this customer's orders (helps explain
+        // why deletion might be blocked, and links straight to each order).
+        async function loadOrders() {
+            const panel = document.getElementById("orders-panel");
+            const rowsEl = document.getElementById("orders-rows");
+            panel.style.display = "";
+            try {
+                const response = await Auth.apiFetch(`/api/orders?customer_id=${customerId}&page_size=50`);
+                if (!response.ok) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">Could not load orders.</td></tr>';
+                    return;
+                }
+                const data = await response.json();
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">No orders yet.</td></tr>';
+                    return;
+                }
+                rowsEl.innerHTML = data.items.map((order) => `<tr>
+                    <td><a href="/orders/${order.id}">#${order.id}</a></td>
+                    <td><span class="badge ${Customers.escapeHtml(order.status)}">${Customers.escapeHtml(order.status)}</span></td>
+                    <td>$${Number(order.total_amount).toFixed(2)}</td>
+                    <td>${Customers.formatDate(order.placed_at)}</td>
+                </tr>`).join("");
+            } catch (err) {
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="4">Could not load orders.</td></tr>';
+            }
         }
 
         document.getElementById("delete-btn").addEventListener("click", async () => {

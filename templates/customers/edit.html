@@ -12,6 +12,10 @@
         <nav class="topnav">
             <a href="/dashboard">Dashboard</a>
             <a href="/customers" class="active">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
         </nav>
         <button id="logout-btn" class="btn small secondary">Log out</button>
     </header>
@@ -27,59 +31,13 @@
                 <div id="banner" class="banner"></div>
 
                 <label class="field">
-                    <span>Name</span>
-                    <input type="text" name="name" maxlength="255" required />
+                    <span>Full name</span>
+                    <input type="text" name="full_name" maxlength="255" required />
                 </label>
 
                 <label class="field">
                     <span>Email</span>
-                    <input type="email" name="email" />
-                </label>
-
-                <label class="field">
-                    <span>Phone</span>
-                    <input type="text" name="phone" maxlength="50" />
-                </label>
-
-                <label class="field">
-                    <span>Company</span>
-                    <input type="text" name="company" maxlength="255" />
-                </label>
-
-                <label class="field">
-                    <span>Status</span>
-                    <select name="status">
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                        <option value="lead">Lead</option>
-                    </select>
-                </label>
-
-                <label class="field">
-                    <span>Address</span>
-                    <input type="text" name="address_line" maxlength="255" />
-                </label>
-
-                <label class="field">
-                    <span>City</span>
-                    <input type="text" name="city" maxlength="120" />
-                </label>
-
-                <label class="field">
-                    <span>Country</span>
-                    <input type="text" name="country" maxlength="120" />
-                </label>
-
-                <label class="field">
-                    <span>Owner</span>
-                    <select name="owner_id">
-                        <option value="">Unassigned</option>
-                    </select>
-                </label>
-
-                <label class="field">
-                    <span>Notes</span>
-                    <textarea name="notes" rows="4"></textarea>
+                    <input type="email" name="email" required />
                 </label>
 
                 <div class="form-actions">
@@ -105,21 +63,6 @@
         document.getElementById("detail-link").href = `/customers/${customerId}`;
         document.getElementById("cancel-link").href = `/customers/${customerId}`;
 
-        // Fill the owner dropdown, then load the customer and preselect its owner.
-        async function loadOwners() {
-            try {
-                const response = await Auth.apiFetch("/api/users?page_size=100");
-                if (!response.ok) return;
-                const data = await response.json();
-                for (const user of data.items) {
-                    const opt = document.createElement("option");
-                    opt.value = user.id;
-                    opt.textContent = user.full_name;
-                    editForm.owner_id.appendChild(opt);
-                }
-            } catch (err) { /* leave "Unassigned" only */ }
-        }
-
         async function loadCustomer() {
             try {
                 const response = await Auth.apiFetch(`/api/customers/${customerId}`);
@@ -129,28 +72,8 @@
                     return;
                 }
                 const customer = await response.json();
-                editForm.name.value = customer.name;
-                editForm.email.value = customer.email || "";
-                editForm.phone.value = customer.phone || "";
-                editForm.company.value = customer.company || "";
-                editForm.status.value = customer.status;
-                editForm.address_line.value = customer.address_line || "";
-                editForm.city.value = customer.city || "";
-                editForm.country.value = customer.country || "";
-
-                // The owner dropdown is only populated when the viewer holds
-                // users.read (see loadOwners). If the current owner isn't
-                // among its options — because that fetch failed/was refused,
-                // or simply raced this one — add it now so selecting it below
-                // doesn't silently fall back to "" and clear the owner on save.
-                if (customer.owner && !editForm.owner_id.querySelector(`option[value="${customer.owner.id}"]`)) {
-                    const opt = document.createElement("option");
-                    opt.value = customer.owner.id;
-                    opt.textContent = customer.owner.full_name;
-                    editForm.owner_id.appendChild(opt);
-                }
-                editForm.owner_id.value = customer.owner ? customer.owner.id : "";
-                editForm.notes.value = customer.notes || "";
+                editForm.full_name.value = customer.full_name;
+                editForm.email.value = customer.email;
             } catch (err) { /* apiFetch handles 401 */ }
         }
 
@@ -161,16 +84,8 @@
             submitBtn.disabled = true;
 
             const payload = {
-                name: editForm.name.value.trim(),
-                email: editForm.email.value.trim() || null,
-                phone: editForm.phone.value.trim() || null,
-                company: editForm.company.value.trim() || null,
-                status: editForm.status.value,
-                address_line: editForm.address_line.value.trim() || null,
-                city: editForm.city.value.trim() || null,
-                country: editForm.country.value.trim() || null,
-                notes: editForm.notes.value.trim() || null,
-                owner_id: editForm.owner_id.value || null,
+                full_name: editForm.full_name.value.trim(),
+                email: editForm.email.value.trim(),
             };
 
             try {
@@ -192,11 +107,7 @@
             }
         });
 
-        // Start up: owners first, then the customer (so preselecting the owner works).
-        (async function init() {
-            await loadOwners();
-            await loadCustomer();
-        })();
+        loadCustomer();
     </script>
 </body>
 </html>

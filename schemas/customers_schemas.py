@@ -4,33 +4,30 @@ customers_schemas.py
 Pydantic "schemas" for the Customers module.
 
 These describe the SHAPE of the data going in and out of the /api/customers
-API, separately from the SQLAlchemy model in models.py. Request schemas
-validate what a caller sends us; response schemas control exactly what we
-send back (e.g. the owner is shown as a small summary, never the full user).
+API, separately from the SQLAlchemy model in models.py.
 """
 
-import uuid
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-# The only statuses a customer may have. Reused by both schemas below so the
-# allowed set is defined in exactly one place.
-CustomerStatus = Literal["active", "inactive", "lead"]
 
 
 # ---------------------------------------------------------------------------
 # Small shared pieces
 # ---------------------------------------------------------------------------
 
-class OwnerSummary(BaseModel):
-    """A tiny view of the owning user — enough to show a name in the UI."""
+class AddressSummary(BaseModel):
+    """One of a customer's saved shipping addresses (used by the Orders module)."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
-    full_name: str
+    id: int
+    line1: str
+    city: str
+    postal_code: str
+    country: str
+    is_default: bool
 
 
 # ---------------------------------------------------------------------------
@@ -40,38 +37,15 @@ class OwnerSummary(BaseModel):
 class CustomerCreate(BaseModel):
     """Body for POST /api/customers."""
 
-    name: str = Field(min_length=1, max_length=255)
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, max_length=50)
-    company: Optional[str] = Field(default=None, max_length=255)
-    status: CustomerStatus = "active"
-    address_line: Optional[str] = Field(default=None, max_length=255)
-    city: Optional[str] = Field(default=None, max_length=120)
-    country: Optional[str] = Field(default=None, max_length=120)
-    notes: Optional[str] = None
-    # Defaults to the creating user when not given (see customers_service.py).
-    owner_id: Optional[uuid.UUID] = None
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=255)
 
 
 class CustomerUpdate(BaseModel):
-    """
-    Body for PATCH /api/customers/{id} — a partial update.
+    """Body for PATCH /api/customers/{id} — a partial update."""
 
-    Every field is optional: only the fields actually sent are changed. The
-    service layer relies on Pydantic's "which fields were set" tracking to
-    tell "leave owner_id alone" apart from "clear owner_id" (owner_id: null).
-    """
-
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, max_length=50)
-    company: Optional[str] = Field(default=None, max_length=255)
-    status: Optional[CustomerStatus] = None
-    address_line: Optional[str] = Field(default=None, max_length=255)
-    city: Optional[str] = Field(default=None, max_length=120)
-    country: Optional[str] = Field(default=None, max_length=120)
-    notes: Optional[str] = None
-    owner_id: Optional[uuid.UUID] = None
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
 
 
 # ---------------------------------------------------------------------------
@@ -83,13 +57,9 @@ class CustomerListItem(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
-    name: str
-    company: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    status: CustomerStatus
-    owner_id: Optional[uuid.UUID] = None
+    id: int
+    email: str
+    full_name: str
     created_at: datetime
 
 
@@ -97,27 +67,18 @@ class CustomerListPage(BaseModel):
     """A single page of customers, plus the numbers the UI needs for paging."""
 
     items: List[CustomerListItem]
-    total: int          # total matching customers across all pages
-    page: int            # the current page number (1-based)
-    page_size: int        # how many rows per page
-    total_pages: int      # total number of pages
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class CustomerDetail(BaseModel):
-    """The full view of one customer, including a summary of its owner."""
+    """The full view of one customer."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
-    name: str
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    company: Optional[str] = None
-    status: CustomerStatus
-    address_line: Optional[str] = None
-    city: Optional[str] = None
-    country: Optional[str] = None
-    notes: Optional[str] = None
-    owner: Optional[OwnerSummary] = None
+    id: int
+    email: str
+    full_name: str
     created_at: datetime
-    updated_at: datetime
