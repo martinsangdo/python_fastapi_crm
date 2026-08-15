@@ -17,5 +17,16 @@
         <h1>{{ title }}</h1>
         <p>{{ message }}</p>
     </main>
+
+    <!-- Our shared auth helper (login state, landing-route lookup). -->
+    <script src="/static/auth.js"></script>
+    <script>
+        // A logged-in visitor doesn't need the public welcome page — send them
+        // straight to the landing page their permissions allow, same as the
+        // already-logged-in redirect on /login and /register.
+        if (Auth.isLoggedIn()) {
+            window.location.href = Auth.getLandingRoute();
+        }
+    </script>
 </body>
 </html>

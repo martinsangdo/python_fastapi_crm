@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <!-- Shared header bar. The "Customers" link is marked active. -->
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers" class="active">Customers</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Customers</h1>
+            <!-- Hidden until we confirm the viewer has customers.create. -->
+            <a id="new-customer-btn" href="/customers/new" class="btn small" style="display:none">
+                + New customer
+            </a>
+        </div>
+
+        <div class="panel">
+            <!-- Search + filters. Changing any of them reloads the table. -->
+            <div class="toolbar">
+                <label class="field">
+                    <span>Search</span>
+                    <input id="f-search" type="text" placeholder="Name, company or email…" />
+                </label>
+                <label class="field">
+                    <span>Status</span>
+                    <select id="f-status">
+                        <option value="">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="lead">Lead</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Owner</span>
+                    <select id="f-owner">
+                        <option value="">All owners</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="name">Name</th>
+                            <th>Company</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th class="sortable" data-sort="status">Status</th>
+                            <th>Owner</th>
+                            <th class="sortable" data-sort="created_at">Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows">
+                        <tr class="state-row"><td colspan="8">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Paging controls. -->
+            <div class="pagination">
+                <span id="page-info">—</span>
+                <div class="pages">
+                    <button id="prev-btn" class="btn small secondary" disabled>Previous</button>
+                    <button id="next-btn" class="btn small secondary" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/customers.js"></script>
+    <script>
+        // Guard: no token -> straight to /login.
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        // The current query state. Everything the table shows derives from this.
+        const state = {
+            search: "",
+            status: "",
+            owner_id: "",
+            sort: "created_at",
+            order: "desc",
+            page: 1,
+            page_size: 20,
+        };
+
+        let myPermissions = new Set();   // the viewer's own permission codes
+
+        const rowsEl = document.getElementById("rows");
+        const pageInfoEl = document.getElementById("page-info");
+
+        // Badge class per status ("active" | "inactive" | "lead").
+        function statusBadge(status) {
+            const label = status.charAt(0).toUpperCase() + status.slice(1);
+            return `<span class="badge ${Customers.escapeHtml(status)}">${label}</span>`;
+        }
+
+        // Build the query string from the current state (skipping empty values).
+        function buildQuery() {
+            const params = new URLSearchParams();
+            if (state.search) params.set("search", state.search);
+            if (state.status) params.set("status", state.status);
+            if (state.owner_id) params.set("owner_id", state.owner_id);
+            params.set("sort", state.sort);
+            params.set("order", state.order);
+            params.set("page", state.page);
+            params.set("page_size", state.page_size);
+            return params.toString();
+        }
+
+        // Draw one <tr> for a customer, gating the action buttons by permission.
+        function renderRow(customer) {
+            const actions = [];
+            actions.push(`<a href="/customers/${customer.id}">View</a>`);
+
+            if (myPermissions.has("customers.update")) {
+                actions.push(`<a href="/customers/${customer.id}/edit">Edit</a>`);
+            }
+            if (myPermissions.has("customers.delete")) {
+                actions.push(`<button class="danger" data-action="delete" data-id="${customer.id}" data-name="${Customers.escapeHtml(customer.name)}">Delete</button>`);
+            }
+
+            return `<tr>
+                <td>${Customers.escapeHtml(customer.name)}</td>
+                <td>${Customers.escapeHtml(customer.company)}</td>
+                <td>${Customers.escapeHtml(customer.email)}</td>
+                <td>${Customers.escapeHtml(customer.phone)}</td>
+                <td>${statusBadge(customer.status)}</td>
+                <td>${ownerName(customer.owner_id)}</td>
+                <td>${Customers.formatDate(customer.created_at)}</td>
+                <td><div class="row-actions">${actions.join("")}</div></td>
+            </tr>`;
+        }
+
+        // A lookup from user id -> full name, filled by loadOwners() below, so
+        // the table can show a name instead of a raw UUID in the Owner column.
+        let ownersById = new Map();
+        function ownerName(ownerId) {
+            if (!ownerId) return '<span style="color:var(--muted)">Unassigned</span>';
+            return Customers.escapeHtml(ownersById.get(ownerId) || "—");
+        }
+
+        // Fetch a page of customers and paint the table.
+        async function loadCustomers() {
+            rowsEl.innerHTML = '<tr class="state-row"><td colspan="8">Loading…</td></tr>';
+            try {
+                const response = await Auth.apiFetch(`/api/customers?${buildQuery()}`);
+                if (!response.ok) {
+                    const msg = await Customers.errorMessage(response, "Could not load customers.");
+                    rowsEl.innerHTML = `<tr class="state-row"><td colspan="8">${Customers.escapeHtml(msg)}</td></tr>`;
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    rowsEl.innerHTML = '<tr class="state-row"><td colspan="8">No customers match your filters.</td></tr>';
+                } else {
+                    rowsEl.innerHTML = data.items.map(renderRow).join("");
+                }
+
+                // Update the pager.
+                const shownPages = data.total_pages || 1;
+                pageInfoEl.textContent =
+                    `Page ${data.page} of ${shownPages} · ${data.total} customer(s)`;
+                document.getElementById("prev-btn").disabled = data.page <= 1;
+                document.getElementById("next-btn").disabled = data.page >= shownPages;
+            } catch (err) {
+                // apiFetch handles the 401 redirect; anything else shows here.
+                rowsEl.innerHTML = '<tr class="state-row"><td colspan="8">Could not load customers.</td></tr>';
+            }
+        }
+
+        // Fill the owner filter dropdown from GET /api/users (any user with
+        // customers.read that also holds users.read will see real names; if
+        // not permitted, the dropdown simply stays as "All owners").
+        async function loadOwners() {
+            try {
+                const response = await Auth.apiFetch("/api/users?page_size=100");
+                if (!response.ok) return;
+                const data = await response.json();
+                const select = document.getElementById("f-owner");
+                for (const user of data.items) {
+                    ownersById.set(user.id, user.full_name);
+                    const opt = document.createElement("option");
+                    opt.value = user.id;
+                    opt.textContent = user.full_name;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "All owners" only */ }
+        }
+
+        // Handle delete clicks (event delegation).
+        rowsEl.addEventListener("click", async (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            const { action, id, name } = button.dataset;
+
+            if (action === "delete") {
+                const ok = window.confirm(`Delete ${name}? This cannot be undone.`);
+                if (!ok) return;
+            }
+
+            button.disabled = true;
+            try {
+                const response = await Auth.apiFetch(`/api/customers/${id}`, { method: "DELETE" });
+                if (!response.ok) {
+                    const msg = await Customers.errorMessage(response, "Action failed.");
+                    window.alert(msg);
+                    button.disabled = false;
+                    return;
+                }
+                loadCustomers();   // refresh the table to reflect the change
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+
+        // ---- wire up the filter/search/sort/paging controls ----------------
+
+        // Debounce the search box so we don't fire a request on every keystroke.
+        let searchTimer = null;
+        document.getElementById("f-search").addEventListener("input", (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                state.search = e.target.value.trim();
+                state.page = 1;
+                loadCustomers();
+            }, 300);
+        });
+
+        document.getElementById("f-status").addEventListener("change", (e) => {
+            state.status = e.target.value;
+            state.page = 1;
+            loadCustomers();
+        });
+
+        document.getElementById("f-owner").addEventListener("change", (e) => {
+            state.owner_id = e.target.value;
+            state.page = 1;
+            loadCustomers();
+        });
+
+        // Clicking a sortable header sorts by it; clicking the same one flips order.
+        document.querySelectorAll("th.sortable").forEach((th) => {
+            th.addEventListener("click", () => {
+                const column = th.dataset.sort;
+                if (state.sort === column) {
+                    state.order = state.order === "asc" ? "desc" : "asc";
+                } else {
+                    state.sort = column;
+                    state.order = "desc";
+                }
+                state.page = 1;
+                loadCustomers();
+            });
+        });
+
+        document.getElementById("prev-btn").addEventListener("click", () => {
+            if (state.page > 1) { state.page -= 1; loadCustomers(); }
+        });
+        document.getElementById("next-btn").addEventListener("click", () => {
+            state.page += 1; loadCustomers();
+        });
+
+        // ---- start up --------------------------------------------------------
+        async function init() {
+            // Learn what we can do (drives the "New customer" button + row actions).
+            myPermissions = await Customers.fetchMyPermissions();
+            if (myPermissions.has("customers.create")) {
+                document.getElementById("new-customer-btn").style.display = "";
+            }
+
+            await loadOwners();
+            await loadCustomers();
+        }
+        init();
+    </script>
+</body>
+</html>

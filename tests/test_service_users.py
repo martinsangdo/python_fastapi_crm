@@ -13,9 +13,9 @@ import uuid
 
 import pytest
 
-import users_service as service
+import service.users_service as service
 from security import verify_password
-from users_schemas import UserAdminCreate, UserAdminUpdate
+from schemas.users_schemas import UserAdminCreate, UserAdminUpdate
 
 
 # ---------------------------------------------------------------------------

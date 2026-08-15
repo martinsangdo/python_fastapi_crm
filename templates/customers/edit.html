@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers" class="active">Customers</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Edit customer</h1>
+            <a id="detail-link" href="/customers" class="btn small secondary">Back to detail</a>
+        </div>
+
+        <div class="panel">
+            <form id="edit-form" class="admin-form">
+                <div id="banner" class="banner"></div>
+
+                <label class="field">
+                    <span>Name</span>
+                    <input type="text" name="name" maxlength="255" required />
+                </label>
+
+                <label class="field">
+                    <span>Email</span>
+                    <input type="email" name="email" />
+                </label>
+
+                <label class="field">
+                    <span>Phone</span>
+                    <input type="text" name="phone" maxlength="50" />
+                </label>
+
+                <label class="field">
+                    <span>Company</span>
+                    <input type="text" name="company" maxlength="255" />
+                </label>
+
+                <label class="field">
+                    <span>Status</span>
+                    <select name="status">
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="lead">Lead</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Address</span>
+                    <input type="text" name="address_line" maxlength="255" />
+                </label>
+
+                <label class="field">
+                    <span>City</span>
+                    <input type="text" name="city" maxlength="120" />
+                </label>
+
+                <label class="field">
+                    <span>Country</span>
+                    <input type="text" name="country" maxlength="120" />
+                </label>
+
+                <label class="field">
+                    <span>Owner</span>
+                    <select name="owner_id">
+                        <option value="">Unassigned</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Notes</span>
+                    <textarea name="notes" rows="4"></textarea>
+                </label>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn">Save changes</button>
+                    <a id="cancel-link" href="/customers" class="btn secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/customers.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        // The server injected the customer id into the page.
+        const customerId = "{{ customer_id }}";
+        const editForm = document.getElementById("edit-form");
+        const banner = document.getElementById("banner");
+
+        // Point the "Back"/"Cancel" links at this customer's detail page.
+        document.getElementById("detail-link").href = `/customers/${customerId}`;
+        document.getElementById("cancel-link").href = `/customers/${customerId}`;
+
+        // Fill the owner dropdown, then load the customer and preselect its owner.
+        async function loadOwners() {
+            try {
+                const response = await Auth.apiFetch("/api/users?page_size=100");
+                if (!response.ok) return;
+                const data = await response.json();
+                for (const user of data.items) {
+                    const opt = document.createElement("option");
+                    opt.value = user.id;
+                    opt.textContent = user.full_name;
+                    editForm.owner_id.appendChild(opt);
+                }
+            } catch (err) { /* leave "Unassigned" only */ }
+        }
+
+        async function loadCustomer() {
+            try {
+                const response = await Auth.apiFetch(`/api/customers/${customerId}`);
+                if (!response.ok) {
+                    const msg = await Customers.errorMessage(response, "Could not load the customer.");
+                    Customers.showBanner(banner, msg, "error");
+                    return;
+                }
+                const customer = await response.json();
+                editForm.name.value = customer.name;
+                editForm.email.value = customer.email || "";
+                editForm.phone.value = customer.phone || "";
+                editForm.company.value = customer.company || "";
+                editForm.status.value = customer.status;
+                editForm.address_line.value = customer.address_line || "";
+                editForm.city.value = customer.city || "";
+                editForm.country.value = customer.country || "";
+
+                // The owner dropdown is only populated when the viewer holds
+                // users.read (see loadOwners). If the current owner isn't
+                // among its options — because that fetch failed/was refused,
+                // or simply raced this one — add it now so selecting it below
+                // doesn't silently fall back to "" and clear the owner on save.
+                if (customer.owner && !editForm.owner_id.querySelector(`option[value="${customer.owner.id}"]`)) {
+                    const opt = document.createElement("option");
+                    opt.value = customer.owner.id;
+                    opt.textContent = customer.owner.full_name;
+                    editForm.owner_id.appendChild(opt);
+                }
+                editForm.owner_id.value = customer.owner ? customer.owner.id : "";
+                editForm.notes.value = customer.notes || "";
+            } catch (err) { /* apiFetch handles 401 */ }
+        }
+
+        editForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            Customers.hideBanner(banner);
+            const submitBtn = editForm.querySelector("button[type=submit]");
+            submitBtn.disabled = true;
+
+            const payload = {
+                name: editForm.name.value.trim(),
+                email: editForm.email.value.trim() || null,
+                phone: editForm.phone.value.trim() || null,
+                company: editForm.company.value.trim() || null,
+                status: editForm.status.value,
+                address_line: editForm.address_line.value.trim() || null,
+                city: editForm.city.value.trim() || null,
+                country: editForm.country.value.trim() || null,
+                notes: editForm.notes.value.trim() || null,
+                owner_id: editForm.owner_id.value || null,
+            };
+
+            try {
+                const response = await Auth.apiFetch(`/api/customers/${customerId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const msg = await Customers.errorMessage(response, "Could not save changes.");
+                    Customers.showBanner(banner, msg, "error");
+                    submitBtn.disabled = false;
+                    return;
+                }
+                Customers.showBanner(banner, "Changes saved.", "success");
+                submitBtn.disabled = false;
+            } catch (err) {
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Start up: owners first, then the customer (so preselecting the owner works).
+        (async function init() {
+            await loadOwners();
+            await loadCustomer();
+        })();
+    </script>
+</body>
+</html>

@@ -423,6 +423,11 @@ table.data td:last-child {
     color: var(--brand);
 }
 
+.badge.lead {
+    background: #fef3c7;
+    color: #92400e;
+}
+
 /* ---- Buttons (small, secondary, danger variants) ------------------------- */
 .btn.small {
     width: auto;
@@ -458,6 +463,17 @@ table.data td:last-child {
 .row-actions {
     display: flex;
     gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+/* A horizontal group of page-header buttons (e.g. Back / Edit / Delete).
+   Same layout as .row-actions but WITHOUT its link-style button reset, so a
+   plain .btn (like the header's Delete button) keeps its normal styling
+   instead of colliding with the small inline row-action look. */
+.page-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     flex-wrap: wrap;
 }
 
@@ -515,19 +531,23 @@ table.data td:last-child {
 }
 
 .admin-form input,
-.admin-form select {
+.admin-form select,
+.admin-form textarea {
     padding: 0.65rem 0.8rem;
     font-size: 1rem;
     font-weight: 400;
+    font-family: inherit;
     color: var(--ink);
     background: #ffffff;
     border: 1px solid var(--line);
     border-radius: 9px;
     outline: none;
+    resize: vertical;
 }
 
 .admin-form input:focus,
-.admin-form select:focus {
+.admin-form select:focus,
+.admin-form textarea:focus {
     border-color: var(--brand);
     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }

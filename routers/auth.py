@@ -21,13 +21,13 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-import auth_service
+import service.auth_service as auth_service
 from authorization import get_user_permission_codes
 from database import get_db
 from dependencies import get_current_user
 from models import User
 from navigation import build_navigation
-from schemas import (
+from schemas.auth_schemas import (
     LoginResponse,
     MeResponse,
     PasswordChange,

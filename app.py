@@ -21,8 +21,8 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth, users
-from schemas import UserPublic
+from routers import auth, customers, users
+from schemas.auth_schemas import UserPublic
 
 # Create the application instance.
 app = FastAPI(title="CRM Authentication API")
@@ -43,6 +43,9 @@ app.include_router(auth.router)
 
 # Plug in the Users administration API (/api/users, /api/roles, ...).
 app.include_router(users.router)
+
+# Plug in the Customers API (/api/customers).
+app.include_router(customers.router)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +132,50 @@ def users_edit_page(request: Request, user_id: str):
     """The edit form (name / role / active) plus a reset-password action."""
     return templates.TemplateResponse(
         request, "users/edit.html", {"title": "Edit user", "user_id": user_id}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Customers pages (HTML shells)
+# ---------------------------------------------------------------------------
+# Same pattern as the Users admin pages above: these routes only serve the
+# HTML shell. Each page's JavaScript checks the login token in the browser
+# and then calls the /api/customers API, which is where the real permission
+# checks happen (customers.read/create/update/delete).
+
+@app.get("/customers")
+def customers_list_page(request: Request):
+    """The customer list (table with search, filters, paging)."""
+    return templates.TemplateResponse(
+        request, "customers/list.html", {"title": "Customers"}
+    )
+
+
+@app.get("/customers/new")
+def customers_create_page(request: Request):
+    """The create-customer form."""
+    return templates.TemplateResponse(
+        request, "customers/create.html", {"title": "New customer"}
+    )
+
+
+@app.get("/customers/{customer_id}")
+def customers_detail_page(request: Request, customer_id: str):
+    """The read-only detail view for one customer."""
+    return templates.TemplateResponse(
+        request,
+        "customers/detail.html",
+        {"title": "Customer detail", "customer_id": customer_id},
+    )
+
+
+@app.get("/customers/{customer_id}/edit")
+def customers_edit_page(request: Request, customer_id: str):
+    """The edit form for one customer."""
+    return templates.TemplateResponse(
+        request,
+        "customers/edit.html",
+        {"title": "Edit customer", "customer_id": customer_id},
     )
 
 

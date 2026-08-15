@@ -11,7 +11,7 @@ HTTP is involved here — just the SQL surface the service layer builds on.
 
 import uuid
 
-import users_repository as repo
+import repository.users_repository as repo
 from models import User
 from security import hash_password
 

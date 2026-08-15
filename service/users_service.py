@@ -18,11 +18,11 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-import users_repository as repo
+import repository.users_repository as repo
 from authorization import get_user_permission_codes
 from models import User
 from security import hash_password
-from users_schemas import (
+from schemas.users_schemas import (
     RoleSummary,
     UserAdminCreate,
     UserAdminDetail,

@@ -70,7 +70,7 @@ def _sqlite_uuid_lookup_shim(monkeypatch):
     """
     import uuid as _uuid
 
-    import auth_service
+    import service.auth_service as auth_service
     import dependencies
 
     def _coercing(original):

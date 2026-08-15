@@ -22,7 +22,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from auth_service import get_user_by_id
+from service.auth_service import get_user_by_id
 from database import get_db
 from models import User
 from security import decode_token

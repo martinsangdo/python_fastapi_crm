@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from models import User
-from schemas import PasswordChange, UserLogin, UserRegister
+from schemas.auth_schemas import PasswordChange, UserLogin, UserRegister
 from security import hash_password, verify_password
 
 

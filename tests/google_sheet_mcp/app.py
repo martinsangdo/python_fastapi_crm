@@ -108,7 +108,7 @@ class GoogleSheetsMCPServer:
                                 "description": "The exact name of the worksheet tab to read.",
                             },
                             "limit": {
-                                "type": "integer",
+                                "type": ["integer", "string"],
                                 "description": "Maximum number of rows to retrieve (default: 100).",
                             },
                         },
@@ -216,7 +216,10 @@ class GoogleSheetsMCPServer:
 
             elif name == "read_sheet_data":
                 ws_name = arguments.get("worksheet_name")
-                limit = arguments.get("limit", 100)
+                try:
+                    limit = int(arguments.get("limit", 100))
+                except (TypeError, ValueError):
+                    limit = 100
                 ws = self._resolve_worksheet(doc, ws_name)
                 data = self._get_worksheet_records(ws)[:limit]
                 return json.dumps({"worksheet": ws.title, "record_count": len(data), "data": data})

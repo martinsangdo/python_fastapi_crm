@@ -23,6 +23,8 @@
              user holds the matching permission (filled in by JavaScript). -->
         <nav id="admin-nav" style="display:none; margin-bottom: 1.25rem;">
             <div class="divider"></div>
+            <a id="customers-link" href="/customers" class="btn secondary"
+               style="display:none">Manage customers</a>
             <a id="users-link" href="/admin/users" class="btn secondary"
                style="display:none">Manage users</a>
         </nav>
@@ -49,16 +51,24 @@
         }
         loadUser();
 
-        // Show the "Manage users" link only if the user has the users.read
+        // Show each shortcut only if the user has the matching *.read
         // permission. (The API still enforces this on its own.)
         async function loadAdminLinks() {
             try {
                 const response = await Auth.apiFetch("/api/me/permissions");
                 if (!response.ok) return;
                 const { permissions } = await response.json();
+                let anyShown = false;
+                if (permissions.includes("customers.read")) {
+                    document.getElementById("customers-link").style.display = "";
+                    anyShown = true;
+                }
                 if (permissions.includes("users.read")) {
-                    document.getElementById("admin-nav").style.display = "";
                     document.getElementById("users-link").style.display = "";
+                    anyShown = true;
+                }
+                if (anyShown) {
+                    document.getElementById("admin-nav").style.display = "";
                 }
             } catch (err) {
                 // No admin links if we can't confirm the permission.

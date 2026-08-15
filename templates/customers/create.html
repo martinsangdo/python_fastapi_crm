@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="admin-page">
+    <header class="topbar">
+        <div class="brand">CRM</div>
+        <nav class="topnav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/customers" class="active">Customers</a>
+        </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
+
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>New customer</h1>
+            <a href="/customers" class="btn small secondary">Back to list</a>
+        </div>
+
+        <div class="panel">
+            <form id="create-form" class="admin-form">
+                <div id="banner" class="banner"></div>
+
+                <label class="field">
+                    <span>Name</span>
+                    <input type="text" name="name" maxlength="255" required />
+                </label>
+
+                <label class="field">
+                    <span>Email</span>
+                    <input type="email" name="email" />
+                </label>
+
+                <label class="field">
+                    <span>Phone</span>
+                    <input type="text" name="phone" maxlength="50" />
+                </label>
+
+                <label class="field">
+                    <span>Company</span>
+                    <input type="text" name="company" maxlength="255" />
+                </label>
+
+                <label class="field">
+                    <span>Status</span>
+                    <select name="status">
+                        <option value="active" selected>Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="lead">Lead</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Address</span>
+                    <input type="text" name="address_line" maxlength="255" />
+                </label>
+
+                <label class="field">
+                    <span>City</span>
+                    <input type="text" name="city" maxlength="120" />
+                </label>
+
+                <label class="field">
+                    <span>Country</span>
+                    <input type="text" name="country" maxlength="120" />
+                </label>
+
+                <!-- Owner dropdown. Populated from GET /api/users; defaults to
+                     "Me" (the server assigns the creating user when left blank). -->
+                <label class="field">
+                    <span>Owner</span>
+                    <select name="owner_id">
+                        <option value="">Me</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Notes</span>
+                    <textarea name="notes" rows="4"></textarea>
+                </label>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn">Create customer</button>
+                    <a href="/customers" class="btn secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/customers.js"></script>
+    <script>
+        Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+
+        const form = document.getElementById("create-form");
+        const banner = document.getElementById("banner");
+
+        // Fill the owner dropdown (best effort — requires users.read; if the
+        // viewer lacks it, the dropdown simply stays as "Me").
+        async function loadOwners() {
+            try {
+                const response = await Auth.apiFetch("/api/users?page_size=100");
+                if (!response.ok) return;
+                const data = await response.json();
+                const select = form.owner_id;
+                for (const user of data.items) {
+                    const opt = document.createElement("option");
+                    opt.value = user.id;
+                    opt.textContent = user.full_name;
+                    select.appendChild(opt);
+                }
+            } catch (err) { /* leave "Me" only */ }
+        }
+        loadOwners();
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            Customers.hideBanner(banner);
+
+            const submitBtn = form.querySelector("button[type=submit]");
+            submitBtn.disabled = true;
+
+            // Build the request body. Blank optional fields become null so we
+            // don't send empty strings for things like email/phone.
+            const payload = {
+                name: form.name.value.trim(),
+                email: form.email.value.trim() || null,
+                phone: form.phone.value.trim() || null,
+                company: form.company.value.trim() || null,
+                status: form.status.value,
+                address_line: form.address_line.value.trim() || null,
+                city: form.city.value.trim() || null,
+                country: form.country.value.trim() || null,
+                notes: form.notes.value.trim() || null,
+                owner_id: form.owner_id.value || null,
+            };
+
+            try {
+                const response = await Auth.apiFetch("/api/customers", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const msg = await Customers.errorMessage(response, "Could not create customer.");
+                    Customers.showBanner(banner, msg, "error");
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                const created = await response.json();
+                // Land on the new customer's detail page.
+                window.location.href = `/customers/${created.id}`;
+            } catch (err) {
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -29,13 +29,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-import users_service as service
+import service.users_service as service
 from authorization import get_user_permission_codes, require_permission
 from database import get_db
 from dependencies import get_current_user
 from models import User
-from users_repository import list_roles
-from users_schemas import (
+from repository.users_repository import list_roles
+from schemas.users_schemas import (
     CurrentPermissions,
     RoleSummary,
     UserAdminCreate,

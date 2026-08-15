@@ -3,18 +3,19 @@ models.py
 ---------
 The database tables, described as Python classes ("models").
 
-We have four models:
+We have five models:
   * `User`        — a person who can log in (the authentication module).
   * `Role`        — a named group a user belongs to, e.g. Admin / Manager / Sales.
   * `Permission`  — one thing that can be done, e.g. "customers.read".
   * `role_permissions` — the link table saying which permissions a role has.
+  * `Customer`    — a company or individual the CRM tracks (the Customers module).
 
-Together the last three make up "RBAC" (Role-Based Access Control). To answer
-"can this user do X?" you follow: user -> role -> permissions.
+The first four make up "RBAC" (Role-Based Access Control). To answer "can this
+user do X?" you follow: user -> role -> permissions.
 
 Each class attribute becomes a column. SQLAlchemy turns these classes into
 real SQL tables for us (see `Base.metadata.create_all(...)` in app.py). These
-models mirror the tables in `sql/rbac.sql`.
+models mirror the tables in `sql/rbac.sql` and `sql/customers.sql`.
 """
 
 import uuid
@@ -207,3 +208,67 @@ class Permission(Base):
 
     def __repr__(self) -> str:
         return f"<Permission code={self.code!r}>"
+
+
+class Customer(Base):
+    """One row = one company or individual the CRM tracks."""
+
+    # Named "crm_customers" (not "customers") because this database already
+    # has an unrelated "customers" table from another project sharing the
+    # same Supabase instance — this avoids colliding with its data/schema.
+    __tablename__ = "crm_customers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Company or full contact name. The one field every customer must have.
+    name = Column(String(255), nullable=False, index=True)
+
+    # Contact details. All optional — a lead may start with just a name.
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    company = Column(String(255), nullable=True)
+
+    # One of "active" | "inactive" | "lead" (enforced in the service layer).
+    status = Column(String(20), nullable=False, default="active", index=True)
+
+    address_line = Column(String(255), nullable=True)
+    city = Column(String(120), nullable=True)
+    country = Column(String(120), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    # The salesperson responsible for this customer. NULL if unassigned; set
+    # back to NULL (not deleted) if that user's account is removed.
+    owner_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+
+    # Who created this record, for auditing. Same NULL-on-delete behaviour.
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # Convenience links to the full User objects (no back_populates on User —
+    # we don't need "all customers this user owns" from the User side yet).
+    owner = relationship("User", foreign_keys=[owner_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+    def __repr__(self) -> str:
+        return f"<Customer name={self.name!r} status={self.status!r}>"

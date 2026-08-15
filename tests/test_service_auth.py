@@ -9,8 +9,8 @@ behaviours the router relies on: normalisation, uniqueness, password checks, the
 last_login stamp, and the ValueError signalling used to map to HTTP statuses.
 """
 
-import auth_service
-from schemas import PasswordChange, UserLogin, UserRegister
+import service.auth_service as auth_service
+from schemas.auth_schemas import PasswordChange, UserLogin, UserRegister
 from security import verify_password
 
 from conftest import PASSWORD

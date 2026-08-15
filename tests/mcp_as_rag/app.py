@@ -469,7 +469,7 @@ def load_rag_server(folder_input: str, api_key: str, credentials_dict: Optional[
 
 
 def main():
-    st.title("📚 Document Q&A Assistant (Google Drive + RAG)")
+    st.title("📚 Document Q&A Assistant (Google Drive)")
     st.caption("Ask questions about documents in a public Google Drive folder - powered by Groq Llama 3.3 and MCP-style tools")
 
     with st.sidebar:
