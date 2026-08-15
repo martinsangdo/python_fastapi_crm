@@ -13,6 +13,7 @@ calls the service. Keeping the layers separate is what makes the code easy
 to follow (the same pattern as users_repository.py).
 """
 
+from datetime import datetime
 from typing import Optional, Tuple
 
 from sqlalchemy import or_
@@ -76,6 +77,22 @@ def get_customer(db: Session, customer_id) -> Optional[Customer]:
 def get_customer_by_email(db: Session, email: str) -> Optional[Customer]:
     """Look up a customer by their unique email (used to check for duplicates)."""
     return db.query(Customer).filter(Customer.email == email).first()
+
+
+def list_created_between(
+    db: Session, start: datetime, end: datetime
+) -> list[Customer]:
+    """
+    Customers created in [start, end) — used by the daily "new customers
+    today" check (service/customer_care_service.py). `start`/`end` should be
+    timezone-aware to match the timezone-aware `created_at` column.
+    """
+    return (
+        db.query(Customer)
+        .filter(Customer.created_at >= start, Customer.created_at < end)
+        .order_by(Customer.created_at.asc())
+        .all()
+    )
 
 
 def count_orders(db: Session, customer_id) -> int:

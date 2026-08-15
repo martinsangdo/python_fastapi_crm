@@ -28,6 +28,11 @@ email-validator
 # Lets FastAPI read form data (used by the interactive /docs login form)
 python-multipart
 
+# Google Calendar API client + service-account auth (used by the public
+# customer-care task in routers/tasks.py)
+google-api-python-client
+google-auth
+
 # --- Development / testing only ---
 # Test runner for the pytest suite in tests/
 pytest

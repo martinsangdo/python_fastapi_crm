@@ -21,6 +21,10 @@ os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "30"
 os.environ["REFRESH_TOKEN_EXPIRE_DAYS"] = "7"
 os.environ["DATABASE_URL"] = "sqlite://"  # in-memory; real engine stays unused
 
+# public_auth.py (routers/tasks.py) reads this once at import time too.
+TEST_PUBLIC_API_KEY = "test-task-api-key-do-not-use-in-production"
+os.environ["PUBLIC_TASK_API_KEY"] = TEST_PUBLIC_API_KEY
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402

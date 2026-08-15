@@ -21,7 +21,7 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth, categories, customers, orders, products, users
+from routers import auth, categories, customers, orders, products, tasks, users
 from schemas.auth_schemas import UserPublic
 
 # Create the application instance.
@@ -55,6 +55,11 @@ app.include_router(products.router)
 
 # Plug in the Orders API (/api/orders).
 app.include_router(orders.router)
+
+# Plug in the public scheduled-task API (/api/public/tasks/...). Unlike the
+# routers above, these endpoints are NOT protected by JWT/RBAC — see
+# public_auth.py for their (simpler) shared-API-key check.
+app.include_router(tasks.router)
 
 
 # ---------------------------------------------------------------------------
