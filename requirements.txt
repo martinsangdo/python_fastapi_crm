@@ -40,3 +40,10 @@ httpx
 # --- Development / testing only ---
 # Test runner for the pytest suite in tests/
 pytest
+
+# Reads .docx files. Used by import_customers_from_docx.py.
+python-docx
+
+# Groq API client (LLM used to extract name/email from documents). Used by
+# import_customers_from_docx.py.
+groq
