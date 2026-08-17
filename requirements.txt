@@ -33,8 +33,10 @@ python-multipart
 google-api-python-client
 google-auth
 
+# HTTP client. Used at runtime by service/email_service.py to call the
+# Resend API, and by FastAPI's TestClient to exercise the API in tests.
+httpx
+
 # --- Development / testing only ---
 # Test runner for the pytest suite in tests/
 pytest
-# HTTP client used by FastAPI's TestClient to exercise the API in tests
-httpx

@@ -15,6 +15,7 @@ from conftest import TEST_PUBLIC_API_KEY
 
 import service.customer_care_service as customer_care_service
 from models import Customer
+from service.email_service import EmailConfigError
 from service.google_calendar_service import CalendarConfigError
 
 ENDPOINT = "/api/public/tasks/customer-care-check"
@@ -187,4 +188,92 @@ def test_calendar_lookup_error_returns_503(client, db_session, monkeypatch):
     )
 
     response = client.post(ENDPOINT, headers={"X-API-Key": TEST_PUBLIC_API_KEY})
+    assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# POST /api/public/tasks/new-customers-email-check (Resend summary email)
+# ---------------------------------------------------------------------------
+
+EMAIL_ENDPOINT = "/api/public/tasks/new-customers-email-check"
+
+
+def _stub_notify_email(monkeypatch, address="team@example.com"):
+    monkeypatch.setattr(customer_care_service, "CUSTOMER_CARE_NOTIFY_EMAIL", address)
+
+
+def test_email_endpoint_missing_api_key_is_unauthorized(client):
+    response = client.post(EMAIL_ENDPOINT)
+    assert response.status_code == 401
+
+
+def test_no_new_customers_skips_email_send(client, db_session, monkeypatch):
+    _stub_notify_email(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        customer_care_service.email_service,
+        "send_email",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    response = client.post(EMAIL_ENDPOINT, headers={"X-API-Key": TEST_PUBLIC_API_KEY})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email_sent"] is False
+    assert body["new_customer_count"] == 0
+    assert body["new_customers"] == []
+    assert calls == []  # the Resend API was never called
+
+
+def test_new_customers_sends_one_summary_email(client, db_session, monkeypatch):
+    _create_customer(db_session, "new1@example.com", "New Customer One")
+    _create_customer(db_session, "new2@example.com", "New Customer Two")
+    _stub_notify_email(monkeypatch)
+
+    calls = []
+
+    def fake_send_email(**kwargs):
+        calls.append(kwargs)
+        return {"id": "email123"}
+
+    monkeypatch.setattr(customer_care_service.email_service, "send_email", fake_send_email)
+
+    response = client.post(EMAIL_ENDPOINT, headers={"X-API-Key": TEST_PUBLIC_API_KEY})
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["email_sent"] is True
+    assert body["email_id"] == "email123"
+    assert body["new_customer_count"] == 2
+    assert {c["email"] for c in body["new_customers"]} == {"new1@example.com", "new2@example.com"}
+
+    assert len(calls) == 1
+    assert calls[0]["to"] == "team@example.com"
+    html = calls[0]["html"]
+    assert "New Customer One" in html
+    assert "new1@example.com" in html
+    assert "New Customer Two" in html
+    assert "new2@example.com" in html
+
+
+def test_email_missing_recipient_returns_503(client, db_session, monkeypatch):
+    """No new-customer count is skipped, but a configured recipient is required to send."""
+    _create_customer(db_session, "new6@example.com", "New Customer Six")
+    monkeypatch.setattr(customer_care_service, "CUSTOMER_CARE_NOTIFY_EMAIL", None)
+
+    response = client.post(EMAIL_ENDPOINT, headers={"X-API-Key": TEST_PUBLIC_API_KEY})
+    assert response.status_code == 503
+    assert "CUSTOMER_CARE_NOTIFY_EMAIL" in response.json()["detail"]
+
+
+def test_email_resend_error_returns_503(client, db_session, monkeypatch):
+    _create_customer(db_session, "new7@example.com", "New Customer Seven")
+    _stub_notify_email(monkeypatch)
+
+    def raise_config_error(**kwargs):
+        raise EmailConfigError("Resend API request failed (422): invalid 'from' address")
+
+    monkeypatch.setattr(customer_care_service.email_service, "send_email", raise_config_error)
+
+    response = client.post(EMAIL_ENDPOINT, headers={"X-API-Key": TEST_PUBLIC_API_KEY})
     assert response.status_code == 503

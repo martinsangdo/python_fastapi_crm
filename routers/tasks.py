@@ -12,6 +12,11 @@ Endpoints:
            Google Calendar follow-up event (EVENT_OFFSET_DAYS out) listing
            them. Safe to call more than once a day — a second call for the
            same day finds the existing event instead of duplicating it.
+    POST /api/public/tasks/new-customers-email-check
+        -> check for customers created today; if there are any, email ONE
+           summary to CUSTOMER_CARE_NOTIFY_EMAIL via Resend. Meant to be
+           called once a day — there is no dedupe, so a second call the
+           same day sends a second email.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +25,8 @@ from sqlalchemy.orm import Session
 import service.customer_care_service as customer_care_service
 from database import get_db
 from public_auth import require_public_api_key
-from schemas.tasks_schemas import CustomerCareCheckResponse
+from schemas.tasks_schemas import CustomerCareCheckResponse, NewCustomersEmailCheckResponse
+from service.email_service import EmailConfigError
 from service.google_calendar_service import CalendarConfigError
 
 router = APIRouter(tags=["tasks"])
@@ -47,4 +53,26 @@ def customer_care_check(db: Session = Depends(get_db)):
     except CalendarConfigError as error:
         # A config problem (missing key file / calendar id), not a bad
         # request — 503 tells the caller "try again once this is fixed".
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))
+
+
+@router.post(
+    "/api/public/tasks/new-customers-email-check",
+    response_model=NewCustomersEmailCheckResponse,
+    dependencies=[Depends(require_public_api_key)],
+)
+def new_customers_email_check(db: Session = Depends(get_db)):
+    """
+    Check for customers created today (table `customers`); if there are
+    any, email ONE summary to CUSTOMER_CARE_NOTIFY_EMAIL via Resend.
+
+    Call this once a day from an external scheduler:
+        POST /api/public/tasks/new-customers-email-check
+        X-API-Key: <PUBLIC_TASK_API_KEY>
+    """
+    try:
+        return customer_care_service.check_new_customers_and_email(db)
+    except EmailConfigError as error:
+        # A config problem (missing API key / recipient) or a Resend
+        # rejection — 503 tells the caller "try again once this is fixed".
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))

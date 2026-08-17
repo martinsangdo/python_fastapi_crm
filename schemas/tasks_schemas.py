@@ -37,3 +37,18 @@ class CustomerCareCheckResponse(BaseModel):
     # When the reminder event is/was scheduled for (ISO datetime) — this is
     # EVENT_OFFSET_DAYS after `date`, not `date` itself.
     event_start: Optional[str] = None
+
+
+class NewCustomersEmailCheckResponse(BaseModel):
+    """Body of POST /api/public/tasks/new-customers-email-check."""
+
+    # The local date (APP_TIMEZONE) the check ran for, e.g. "2026-08-15".
+    date: str
+    new_customer_count: int
+    new_customers: List[NewCustomerSummary]
+
+    # Whether a summary email was sent this call (false when there were no
+    # new customers today).
+    email_sent: bool
+    # The Resend message id, when email_sent is True.
+    email_id: Optional[str] = None
