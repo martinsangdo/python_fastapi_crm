@@ -29,7 +29,11 @@ email-validator
 python-multipart
 
 # Talks to Groq's AI API — powers the "ask about the data" dashboard chatbot
+# and the daily summary email
 groq
+
+# Talks to Resend's email API — sends the daily summary email
+resend
 
 # --- Development / testing only ---
 # Test runner for the pytest suite in tests/

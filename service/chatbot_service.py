@@ -15,10 +15,8 @@ experiments under tests/. Requires GROQ_API_KEY in .env.
 """
 
 import json
-import os
 from typing import List
 
-from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 import repository.customers_repository as customers_repository
@@ -26,10 +24,11 @@ import repository.orders_repository as orders_repository
 import repository.products_repository as products_repository
 from schemas.chatbot_schemas import ChatMessage
 from service.dashboard_service import get_dashboard_stats
+from service.groq_client import GROQ_MODEL, GroqNotConfiguredError, get_client
 
-load_dotenv()
-
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# Kept as an alias so existing callers (e.g. routers/dashboard.py) can keep
+# catching chatbot_service.ChatbotNotConfiguredError.
+ChatbotNotConfiguredError = GroqNotConfiguredError
 
 # How many rows of raw data (per table) to show the AI. Keeps the prompt
 # small and fast even if the database grows well past this scaffold's size —
@@ -40,19 +39,6 @@ _MAX_ROWS = 100
 # How many previous turns of the conversation to replay, so follow-up
 # questions work without the prompt growing without bound.
 _MAX_HISTORY_TURNS = 10
-
-
-class ChatbotNotConfiguredError(Exception):
-    """Raised when GROQ_API_KEY is missing, so the router can return a clean error."""
-
-
-def _get_client():
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise ChatbotNotConfiguredError("GROQ_API_KEY is not set.")
-    from groq import Groq  # imported lazily so the package is only needed if used
-
-    return Groq(api_key=api_key)
 
 
 def _data_snapshot(db: Session) -> dict:
@@ -115,7 +101,7 @@ def _system_prompt(snapshot: dict) -> str:
 
 def ask(db: Session, message: str, history: List[ChatMessage]) -> str:
     """Answer one question about the CRM's data, using recent history for context."""
-    client = _get_client()
+    client = get_client()
     snapshot = _data_snapshot(db)
 
     messages = [{"role": "system", "content": _system_prompt(snapshot)}]
