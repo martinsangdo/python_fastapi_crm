@@ -765,6 +765,132 @@ table.data td:last-child {
     font-size: 0.92rem;
 }
 
+/* ---------------------------------------------------------------------------
+   Dashboard chatbot: a floating button that opens a small chat panel.
+   --------------------------------------------------------------------------- */
+.chat-toggle {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    padding: 0.8rem 1.3rem;
+    background: var(--brand);
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(79, 70, 229, 0.35);
+    z-index: 40;
+}
+
+.chat-toggle:hover {
+    background: var(--brand-dark);
+}
+
+.chat-panel {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    width: 360px;
+    max-width: calc(100vw - 2rem);
+    height: 480px;
+    max-height: calc(100vh - 3rem);
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 50;
+}
+
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9rem 1.1rem;
+    background: var(--brand);
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 0.92rem;
+}
+
+.chat-close {
+    background: none;
+    border: none;
+    color: #ffffff;
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.chat-messages {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 1rem;
+    overflow-y: auto;
+    font-size: 0.88rem;
+}
+
+.chat-msg {
+    max-width: 85%;
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.chat-msg.user {
+    align-self: flex-end;
+    background: var(--brand);
+    color: #ffffff;
+    border-bottom-right-radius: 4px;
+}
+
+.chat-msg.assistant {
+    align-self: flex-start;
+    background: #f1f5f9;
+    color: var(--ink);
+    border-bottom-left-radius: 4px;
+}
+
+.chat-msg.thinking {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.chat-input-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.85rem;
+    border-top: 1px solid var(--line);
+}
+
+.chat-input-row input {
+    flex: 1;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.9rem;
+    color: var(--ink);
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    outline: none;
+}
+
+.chat-input-row input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.chat-input-row button {
+    width: auto;
+}
+
 /* On narrow screens, stack the header/toolbar so nothing overflows. */
 @media (max-width: 640px) {
     .page-head {

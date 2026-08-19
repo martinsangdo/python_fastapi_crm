@@ -85,6 +85,27 @@
         <p id="stats-error" class="chart-empty" style="display:none"></p>
     </main>
 
+    <!-- The "ask about the data" chatbot: a floating button that opens a
+         small chat panel. Talks to POST /api/dashboard/chat. -->
+    <button id="chat-toggle" class="chat-toggle">Ask about your data</button>
+
+    <div id="chat-panel" class="chat-panel" style="display:none">
+        <div class="chat-header">
+            <span>Ask about your data</span>
+            <button id="chat-close" class="chat-close" aria-label="Close chat">&times;</button>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+            <div class="chat-msg assistant">
+                Hi! Ask me anything about your customers, products, or orders —
+                e.g. "which product sells best?" or "how many orders are pending?"
+            </div>
+        </div>
+        <form id="chat-form" class="chat-input-row">
+            <input id="chat-input" type="text" placeholder="Ask a question…" autocomplete="off" />
+            <button type="submit" class="btn small">Send</button>
+        </form>
+    </div>
+
     <script src="/static/auth.js"></script>
     <script>
         // Guard: no token -> straight to /login.
@@ -283,6 +304,80 @@
                 });
             }
         }
+
+        // 3. The chatbot: open/close the panel, send questions, show replies.
+        const chatHistory = [];   // [{role, content}, ...] — replayed to the API
+        const MAX_STORED_TURNS = 20;
+
+        const chatToggleEl = document.getElementById("chat-toggle");
+        const chatPanelEl = document.getElementById("chat-panel");
+        const chatMessagesEl = document.getElementById("chat-messages");
+        const chatInputEl = document.getElementById("chat-input");
+
+        function openChat() {
+            chatPanelEl.style.display = "flex";
+            chatToggleEl.style.display = "none";
+            chatInputEl.focus();
+        }
+
+        function closeChat() {
+            chatPanelEl.style.display = "none";
+            chatToggleEl.style.display = "";
+        }
+
+        // textContent (not innerHTML) so a reply can never inject markup.
+        function appendChatMessage(role, text) {
+            const el = document.createElement("div");
+            el.className = `chat-msg ${role}`;
+            el.textContent = text;
+            chatMessagesEl.appendChild(el);
+            el.scrollIntoView({ behavior: "smooth", block: "end" });
+            return el;
+        }
+
+        chatToggleEl.addEventListener("click", openChat);
+        document.getElementById("chat-close").addEventListener("click", closeChat);
+
+        document.getElementById("chat-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const message = chatInputEl.value.trim();
+            if (!message) return;
+
+            chatInputEl.value = "";
+            chatInputEl.disabled = true;
+            appendChatMessage("user", message);
+            const thinkingEl = appendChatMessage("assistant thinking", "Thinking…");
+
+            try {
+                const response = await Auth.apiFetch("/api/dashboard/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message, history: chatHistory }),
+                });
+                thinkingEl.remove();
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    appendChatMessage("assistant", data.detail || "Something went wrong.");
+                    return;
+                }
+
+                const data = await response.json();
+                appendChatMessage("assistant", data.reply);
+                chatHistory.push({ role: "user", content: message });
+                chatHistory.push({ role: "assistant", content: data.reply });
+                if (chatHistory.length > MAX_STORED_TURNS) {
+                    chatHistory.splice(0, chatHistory.length - MAX_STORED_TURNS);
+                }
+            } catch (err) {
+                thinkingEl.remove();
+                // apiFetch already redirects on a 401; anything else shows here.
+                appendChatMessage("assistant", "Could not reach the server.");
+            } finally {
+                chatInputEl.disabled = false;
+                chatInputEl.focus();
+            }
+        });
 
         loadUser();
         loadStats();

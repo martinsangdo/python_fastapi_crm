@@ -28,6 +28,9 @@ email-validator
 # Lets FastAPI read form data (used by the interactive /docs login form)
 python-multipart
 
+# Talks to Groq's AI API — powers the "ask about the data" dashboard chatbot
+groq
+
 # --- Development / testing only ---
 # Test runner for the pytest suite in tests/
 pytest
