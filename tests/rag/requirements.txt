@@ -1,0 +1,14 @@
+# Web UI
+streamlit>=1.32.0
+
+# Pinecone vector database client (with integrated embedding + rerank support built in)
+pinecone>=7.0.0
+
+# Groq LLM API client (used to generate the final answer)
+groq>=0.9.0
+
+# Reads text out of uploaded PDF files
+pypdf>=4.0.0
+
+# Loads API keys from the .env file
+python-dotenv>=1.0.0
