@@ -79,6 +79,11 @@ def get_customer_by_email(db: Session, email: str) -> Optional[Customer]:
     return db.query(Customer).filter(Customer.email == email).first()
 
 
+def get_latest_customer(db: Session) -> Optional[Customer]:
+    """The most recently created customer, or None if there are no customers yet."""
+    return db.query(Customer).order_by(Customer.created_at.desc()).first()
+
+
 def list_created_between(
     db: Session, start: datetime, end: datetime
 ) -> list[Customer]:

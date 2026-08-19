@@ -17,6 +17,10 @@ Endpoints:
            summary to CUSTOMER_CARE_NOTIFY_EMAIL via Resend. Meant to be
            called once a day — there is no dedupe, so a second call the
            same day sends a second email.
+    POST /api/public/tasks/latest-customer-ntfy-notify
+        -> look up the single most recently created customer and push ONE
+           ntfy (https://ntfy.sh) mobile-app notification naming them. No
+           "today" filtering and no dedupe — safe to call any time.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,9 +29,14 @@ from sqlalchemy.orm import Session
 import service.customer_care_service as customer_care_service
 from database import get_db
 from public_auth import require_public_api_key
-from schemas.tasks_schemas import CustomerCareCheckResponse, NewCustomersEmailCheckResponse
+from schemas.tasks_schemas import (
+    CustomerCareCheckResponse,
+    LatestCustomerNtfyNotifyResponse,
+    NewCustomersEmailCheckResponse,
+)
 from service.email_service import EmailConfigError
 from service.google_calendar_service import CalendarConfigError
+from service.ntfy_service import NtfyConfigError
 
 router = APIRouter(tags=["tasks"])
 
@@ -75,4 +84,28 @@ def new_customers_email_check(db: Session = Depends(get_db)):
     except EmailConfigError as error:
         # A config problem (missing API key / recipient) or a Resend
         # rejection — 503 tells the caller "try again once this is fixed".
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))
+
+
+@router.post(
+    "/api/public/tasks/latest-customer-ntfy-notify",
+    response_model=LatestCustomerNtfyNotifyResponse,
+    dependencies=[Depends(require_public_api_key)],
+)
+def latest_customer_ntfy_notify(db: Session = Depends(get_db)):
+    """
+    Push ONE ntfy (https://ntfy.sh) push notification naming the single most
+    recently created customer. Subscribe to NTFY_TOPIC in the ntfy mobile
+    app to receive it.
+
+    Call this whenever you want a fresh check (e.g. from an external
+    scheduler, or by hand):
+        POST /api/public/tasks/latest-customer-ntfy-notify
+        X-API-Key: <PUBLIC_TASK_API_KEY>
+    """
+    try:
+        return customer_care_service.notify_latest_customer_via_ntfy(db)
+    except NtfyConfigError as error:
+        # A config problem (missing topic) or ntfy rejecting the request —
+        # 503 tells the caller "try again once this is fixed".
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))

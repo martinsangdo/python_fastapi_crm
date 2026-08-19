@@ -52,3 +52,14 @@ class NewCustomersEmailCheckResponse(BaseModel):
     email_sent: bool
     # The Resend message id, when email_sent is True.
     email_id: Optional[str] = None
+
+
+class LatestCustomerNtfyNotifyResponse(BaseModel):
+    """Body of POST /api/public/tasks/latest-customer-ntfy-notify."""
+
+    # The most recently created customer, or None if there are no customers
+    # in the database yet.
+    customer: Optional[NewCustomerSummary] = None
+    # Whether an ntfy push notification was sent this call (false when there
+    # are no customers at all).
+    notified: bool

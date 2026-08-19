@@ -27,6 +27,10 @@ is no Resend equivalent of the Calendar dedupe lookup, so this endpoint is
 meant to be called once a day — a second call the same day sends a second
 email.
 
+ntfy flow, any time: look up the single most recently created customer (no
+"today" filtering) and push ONE ntfy mobile-app notification naming them —
+see notify_latest_customer_via_ntfy.
+
 This file knows nothing about HTTP; it just returns a plain dict that the
 router turns directly into the JSON response.
 """
@@ -42,6 +46,7 @@ from sqlalchemy.orm import Session
 import repository.customers_repository as customers_repo
 import service.email_service as email_service
 import service.google_calendar_service as calendar_service
+import service.ntfy_service as ntfy_service
 from models import Customer
 
 load_dotenv()
@@ -210,4 +215,33 @@ def check_new_customers_and_email(db: Session) -> dict:
 
     result["email_sent"] = True
     result["email_id"] = response.get("id")
+    return result
+
+
+def notify_latest_customer_via_ntfy(db: Session) -> dict:
+    """
+    Find the single most recently created customer (regardless of when they
+    were created) and push ONE ntfy notification naming them. Returns a
+    plain dict summarizing what happened, used directly as the API response
+    (see schemas/tasks_schemas.py). Safe to call as often as you like — it
+    always sends a fresh notification, there is no dedupe.
+    """
+    customer = customers_repo.get_latest_customer(db)
+
+    result = {"customer": None, "notified": False}
+
+    if customer is None:
+        return result
+
+    result["customer"] = {
+        "id": customer.id,
+        "full_name": customer.full_name,
+        "email": customer.email,
+    }
+
+    ntfy_service.send_notification(
+        title="Khách hàng mới",
+        message=f"Khách hàng mới nhất: {customer.full_name}",
+    )
+    result["notified"] = True
     return result
