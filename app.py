@@ -21,7 +21,7 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth, categories, customers, orders, products, users
+from routers import auth, categories, customers, dashboard, orders, products, users
 from schemas.auth_schemas import UserPublic
 
 # Create the application instance.
@@ -55,6 +55,9 @@ app.include_router(products.router)
 
 # Plug in the Orders API (/api/orders).
 app.include_router(orders.router)
+
+# Plug in the Dashboard API (/api/dashboard/stats).
+app.include_router(dashboard.router)
 
 
 # ---------------------------------------------------------------------------

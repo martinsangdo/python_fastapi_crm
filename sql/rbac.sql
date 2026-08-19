@@ -151,6 +151,8 @@ ON CONFLICT (code) DO NOTHING;
 -- 5b. Permissions ------------------------------------------------------------
 -- One row per "module.action". Descriptions are auto-built from the two parts.
 INSERT INTO permissions (module, action, code, description) VALUES
+    ('dashboard', 'view',   'dashboard.view',   'View the dashboard'),
+
     ('customers', 'read',   'customers.read',   'View customers'),
     ('customers', 'create', 'customers.create', 'Create customers'),
     ('customers', 'update', 'customers.update', 'Update customers'),
@@ -195,6 +197,7 @@ SELECT r.id, p.id
 FROM roles r
 JOIN permissions p
     ON p.code IN (
+        'dashboard.view',
         'customers.read', 'customers.create', 'customers.update', 'customers.delete',
         'products.read',  'products.create',  'products.update',  'products.delete',
         'orders.read',    'orders.create',    'orders.update',    'orders.delete',
@@ -210,6 +213,7 @@ SELECT r.id, p.id
 FROM roles r
 JOIN permissions p
     ON p.code IN (
+        'dashboard.view',
         'customers.read', 'customers.create', 'customers.update',
         'products.read',
         'orders.read',    'orders.create',    'orders.update',

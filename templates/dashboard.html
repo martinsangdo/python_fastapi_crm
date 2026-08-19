@@ -5,99 +5,287 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <!-- Chart.js draws all the charts on this page. Loaded from a CDN so the
+         project needs no build step — just this one <script> tag. -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
-<body>
-    <main class="card">
+<body class="admin-page">
+    <!-- Shared header bar, same as every other admin page. -->
+    <header class="topbar">
         <div class="brand">CRM</div>
-        <!-- The logged-in user's name is filled in by JavaScript. -->
-        <h1>Hello, <span id="user-name">…</span></h1>
-        <p class="subtitle">You are logged in to the CRM.</p>
-
-        <!-- A small area showing the account details fetched from the API. -->
-        <dl class="details">
-            <dt>Email</dt>
-            <dd id="user-email">…</dd>
-        </dl>
-
-        <!-- Administration shortcuts. Each link is shown only if the logged-in
-             user holds the matching permission (filled in by JavaScript). -->
-        <nav id="admin-nav" style="display:none; margin-bottom: 1.25rem;">
-            <div class="divider"></div>
-            <a id="customers-link" href="/customers" class="btn secondary"
-               style="display:none">Manage customers</a>
-            <a id="categories-link" href="/categories" class="btn secondary"
-               style="display:none">Manage categories</a>
-            <a id="products-link" href="/products" class="btn secondary"
-               style="display:none">Manage products</a>
-            <a id="orders-link" href="/orders" class="btn secondary"
-               style="display:none">Manage orders</a>
-            <a id="users-link" href="/admin/users" class="btn secondary"
-               style="display:none">Manage users</a>
+        <nav class="topnav">
+            <a href="/dashboard" class="active">Dashboard</a>
+            <a href="/customers">Customers</a>
+            <a href="/categories">Categories</a>
+            <a href="/products">Products</a>
+            <a href="/orders">Orders</a>
+            <a href="/admin/users">Users</a>
         </nav>
+        <button id="logout-btn" class="btn small secondary">Log out</button>
+    </header>
 
-        <!-- The logout button. -->
-        <button id="logout-btn" class="btn">Log out</button>
+    <main class="admin-main">
+        <div class="page-head">
+            <h1>Hello, <span id="user-name">…</span></h1>
+        </div>
+
+        <!-- Headline numbers, computed server-side from the whole database. -->
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Customers</div>
+                <div class="stat-value" id="stat-customers">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Products</div>
+                <div class="stat-value" id="stat-products">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Orders</div>
+                <div class="stat-value" id="stat-orders">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Revenue</div>
+                <div class="stat-value" id="stat-revenue">—</div>
+            </div>
+        </div>
+
+        <!-- One panel per chart. Each canvas is drawn by Chart.js once the
+             /api/dashboard/stats response arrives. -->
+        <div class="charts-grid" id="charts-grid" style="display:none">
+            <div class="chart-panel wide">
+                <h2>Revenue by month</h2>
+                <div class="chart-wrap"><canvas id="chart-revenue"></canvas></div>
+            </div>
+            <div class="chart-panel">
+                <h2>Orders by status</h2>
+                <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
+            </div>
+            <div class="chart-panel">
+                <h2>New customers by month</h2>
+                <div class="chart-wrap"><canvas id="chart-customers"></canvas></div>
+            </div>
+            <div class="chart-panel">
+                <h2>Top 5 products by revenue</h2>
+                <div class="chart-wrap"><canvas id="chart-top-products"></canvas></div>
+            </div>
+            <div class="chart-panel">
+                <h2>Products by category</h2>
+                <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+            </div>
+            <div class="chart-panel">
+                <h2>Low stock products</h2>
+                <div class="chart-wrap"><canvas id="chart-low-stock"></canvas></div>
+            </div>
+        </div>
+
+        <p id="stats-empty" class="chart-empty" style="display:none">
+            Not enough data yet to draw charts. Add some customers, products
+            and orders first.
+        </p>
+        <p id="stats-error" class="chart-empty" style="display:none"></p>
     </main>
 
     <script src="/static/auth.js"></script>
     <script>
-        // 1. Guard: if there is no token, bounce to the login page at once.
+        // Guard: no token -> straight to /login.
         Auth.requireLogin();
+        document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
 
-        // 2. Ask the API who we are and show the name + email.
+        // Colours reused across charts, matching the status badge colours in
+        // style.css so a "pending" bar and a "pending" badge always agree.
+        const STATUS_COLORS = {
+            pending: "#f59e0b",
+            paid: "#3b82f6",
+            shipped: "#6366f1",
+            completed: "#22c55e",
+            cancelled: "#ef4444",
+        };
+        const PALETTE = ["#4f46e5", "#7c3aed", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444"];
+
+        function formatMoney(value) {
+            const n = Number(value);
+            if (Number.isNaN(n)) return "—";
+            return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        // 1. Who is logged in? (just the greeting at the top of the page)
         async function loadUser() {
             try {
                 const response = await Auth.apiFetch("/auth/me");
                 const user = await response.json();
                 document.getElementById("user-name").textContent = user.full_name;
-                document.getElementById("user-email").textContent = user.email;
             } catch (err) {
                 // apiFetch already redirects on a 401; nothing else to do.
             }
         }
-        loadUser();
 
-        // Show each shortcut only if the user has the matching *.read
-        // permission. (The API still enforces this on its own.)
-        async function loadAdminLinks() {
+        // 2. Fetch the aggregated numbers and draw every chart.
+        async function loadStats() {
+            let response;
             try {
-                const response = await Auth.apiFetch("/api/me/permissions");
-                if (!response.ok) return;
-                const { permissions } = await response.json();
-                let anyShown = false;
-                if (permissions.includes("customers.read")) {
-                    document.getElementById("customers-link").style.display = "";
-                    anyShown = true;
-                }
-                if (permissions.includes("categories.read")) {
-                    document.getElementById("categories-link").style.display = "";
-                    anyShown = true;
-                }
-                if (permissions.includes("products.read")) {
-                    document.getElementById("products-link").style.display = "";
-                    anyShown = true;
-                }
-                if (permissions.includes("orders.read")) {
-                    document.getElementById("orders-link").style.display = "";
-                    anyShown = true;
-                }
-                if (permissions.includes("users.read")) {
-                    document.getElementById("users-link").style.display = "";
-                    anyShown = true;
-                }
-                if (anyShown) {
-                    document.getElementById("admin-nav").style.display = "";
-                }
+                response = await Auth.apiFetch("/api/dashboard/stats");
             } catch (err) {
-                // No admin links if we can't confirm the permission.
+                return; // apiFetch already redirected on a 401.
+            }
+
+            if (!response.ok) {
+                const errorEl = document.getElementById("stats-error");
+                errorEl.textContent = response.status === 403
+                    ? "You do not have permission to view the dashboard."
+                    : "Could not load dashboard data.";
+                errorEl.style.display = "block";
+                return;
+            }
+
+            const stats = await response.json();
+
+            document.getElementById("stat-customers").textContent = stats.summary.total_customers;
+            document.getElementById("stat-products").textContent = stats.summary.total_products;
+            document.getElementById("stat-orders").textContent = stats.summary.total_orders;
+            document.getElementById("stat-revenue").textContent = formatMoney(stats.summary.total_revenue);
+
+            if (stats.summary.total_orders === 0 && stats.summary.total_customers === 0 && stats.summary.total_products === 0) {
+                document.getElementById("stats-empty").style.display = "block";
+                return;
+            }
+
+            document.getElementById("charts-grid").style.display = "";
+            drawCharts(stats);
+        }
+
+        // Swap a canvas for a short message when its chart has nothing to draw
+        // (e.g. no products fall below the low-stock threshold yet).
+        function showEmptyChart(canvasId, message) {
+            const canvas = document.getElementById(canvasId);
+            canvas.closest(".chart-wrap").innerHTML = `<p class="chart-empty">${message}</p>`;
+        }
+
+        function drawCharts(stats) {
+            // Revenue by month — a line chart showing the recent trend.
+            new Chart(document.getElementById("chart-revenue"), {
+                type: "line",
+                data: {
+                    labels: stats.revenue_by_month.map((p) => p.month),
+                    datasets: [{
+                        label: "Revenue",
+                        data: stats.revenue_by_month.map((p) => Number(p.value)),
+                        borderColor: "#4f46e5",
+                        backgroundColor: "rgba(79, 70, 229, 0.12)",
+                        tension: 0.3,
+                        fill: true,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } },
+                },
+            });
+
+            // Orders by status — a doughnut, coloured to match the badges.
+            new Chart(document.getElementById("chart-status"), {
+                type: "doughnut",
+                data: {
+                    labels: stats.orders_by_status.map((s) => s.status),
+                    datasets: [{
+                        data: stats.orders_by_status.map((s) => s.count),
+                        backgroundColor: stats.orders_by_status.map((s) => STATUS_COLORS[s.status] || "#94a3b8"),
+                    }],
+                },
+                options: { responsive: true, maintainAspectRatio: false },
+            });
+
+            // New customers by month — a simple bar chart.
+            new Chart(document.getElementById("chart-customers"), {
+                type: "bar",
+                data: {
+                    labels: stats.new_customers_by_month.map((p) => p.month),
+                    datasets: [{
+                        label: "New customers",
+                        data: stats.new_customers_by_month.map((p) => Number(p.value)),
+                        backgroundColor: "#0ea5e9",
+                        borderRadius: 4,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+                },
+            });
+
+            // Top 5 products by revenue — a horizontal bar chart.
+            if (stats.top_products.length === 0) {
+                showEmptyChart("chart-top-products", "No orders yet — nothing sold.");
+            } else {
+                new Chart(document.getElementById("chart-top-products"), {
+                    type: "bar",
+                    data: {
+                        labels: stats.top_products.map((p) => p.name),
+                        datasets: [{
+                            label: "Revenue",
+                            data: stats.top_products.map((p) => Number(p.revenue)),
+                            backgroundColor: PALETTE,
+                            borderRadius: 4,
+                        }],
+                    },
+                    options: {
+                        indexAxis: "y",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { beginAtZero: true } },
+                    },
+                });
+            }
+
+            // Products by category — a doughnut.
+            if (stats.products_by_category.length === 0) {
+                showEmptyChart("chart-categories", "No categories have products yet.");
+            } else {
+                new Chart(document.getElementById("chart-categories"), {
+                    type: "doughnut",
+                    data: {
+                        labels: stats.products_by_category.map((c) => c.category),
+                        datasets: [{
+                            data: stats.products_by_category.map((c) => c.count),
+                            backgroundColor: PALETTE,
+                        }],
+                    },
+                    options: { responsive: true, maintainAspectRatio: false },
+                });
+            }
+
+            // Low stock products — a horizontal bar chart, red = most urgent.
+            if (stats.low_stock_products.length === 0) {
+                showEmptyChart("chart-low-stock", "No products are low on stock.");
+            } else {
+                new Chart(document.getElementById("chart-low-stock"), {
+                    type: "bar",
+                    data: {
+                        labels: stats.low_stock_products.map((p) => p.name),
+                        datasets: [{
+                            label: "In stock",
+                            data: stats.low_stock_products.map((p) => p.stock_quantity),
+                            backgroundColor: "#ef4444",
+                            borderRadius: 4,
+                        }],
+                    },
+                    options: {
+                        indexAxis: "y",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+                    },
+                });
             }
         }
-        loadAdminLinks();
 
-        // 3. Wire up the logout button.
-        document
-            .getElementById("logout-btn")
-            .addEventListener("click", () => Auth.logout());
+        loadUser();
+        loadStats();
     </script>
 </body>
 </html>

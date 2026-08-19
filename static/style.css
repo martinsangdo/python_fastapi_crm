@@ -693,6 +693,78 @@ table.data td:last-child {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* ---------------------------------------------------------------------------
+   Dashboard: KPI cards + chart panels.
+   --------------------------------------------------------------------------- */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.stat-card {
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.1rem 1.3rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.stat-card .stat-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+.stat-card .stat-value {
+    margin-top: 0.3rem;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem;
+}
+
+.chart-panel {
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.25rem 1.4rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* Span every column — used for the revenue trend, the widest chart. */
+.chart-panel.wide {
+    grid-column: 1 / -1;
+}
+
+.chart-panel h2 {
+    margin-bottom: 0.9rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.chart-panel .chart-wrap {
+    position: relative;
+    height: 260px;
+}
+
+/* Centered helper text shown instead of the charts (loading/empty/error). */
+.chart-empty {
+    padding: 2.5rem 0;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
 /* On narrow screens, stack the header/toolbar so nothing overflows. */
 @media (max-width: 640px) {
     .page-head {
