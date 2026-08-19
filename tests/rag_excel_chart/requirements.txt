@@ -1,0 +1,19 @@
+# Web app UI
+streamlit
+
+# Reading Excel files
+pandas
+openpyxl
+xlrd
+
+# Vector database (stores the Excel data + does the embedding for us)
+pinecone
+
+# Groq LLM (fast, free-tier friendly) for understanding questions and writing answers
+groq
+
+# Charts
+plotly
+
+# Reads API keys from a local .env file
+python-dotenv
