@@ -53,27 +53,63 @@
              /api/dashboard/stats response arrives. -->
         <div class="charts-grid" id="charts-grid" style="display:none">
             <div class="chart-panel wide">
-                <h2>Revenue by month</h2>
+                <div class="chart-panel-head">
+                    <h2>Revenue by month</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-revenue" data-filename="revenue-by-month.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-revenue"></canvas></div>
             </div>
             <div class="chart-panel">
-                <h2>Orders by status</h2>
+                <div class="chart-panel-head">
+                    <h2>Orders by status</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-status" data-filename="orders-by-status.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
             </div>
             <div class="chart-panel">
-                <h2>New customers by month</h2>
+                <div class="chart-panel-head">
+                    <h2>New customers by month</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-customers" data-filename="new-customers-by-month.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-customers"></canvas></div>
             </div>
             <div class="chart-panel">
-                <h2>Top 5 products by revenue</h2>
+                <div class="chart-panel-head">
+                    <h2>Top 5 products by revenue</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-top-products" data-filename="top-products-by-revenue.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-top-products"></canvas></div>
             </div>
             <div class="chart-panel">
-                <h2>Products by category</h2>
+                <div class="chart-panel-head">
+                    <h2>Products by category</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-categories" data-filename="products-by-category.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
             </div>
             <div class="chart-panel">
-                <h2>Low stock products</h2>
+                <div class="chart-panel-head">
+                    <h2>Low stock products</h2>
+                    <button type="button" class="btn small secondary chart-download-btn"
+                            data-chart="chart-low-stock" data-filename="low-stock-products.png">
+                        Download PNG
+                    </button>
+                </div>
                 <div class="chart-wrap"><canvas id="chart-low-stock"></canvas></div>
             </div>
         </div>
@@ -175,15 +211,22 @@
         }
 
         // Swap a canvas for a short message when its chart has nothing to draw
-        // (e.g. no products fall below the low-stock threshold yet).
+        // (e.g. no products fall below the low-stock threshold yet). Also
+        // disables that panel's download button, since there is no image to save.
         function showEmptyChart(canvasId, message) {
             const canvas = document.getElementById(canvasId);
             canvas.closest(".chart-wrap").innerHTML = `<p class="chart-empty">${message}</p>`;
+            const button = document.querySelector(`.chart-download-btn[data-chart="${canvasId}"]`);
+            if (button) button.disabled = true;
         }
+
+        // Every live Chart.js instance, keyed by its canvas id — used to export
+        // a chart to a downloadable PNG.
+        const charts = {};
 
         function drawCharts(stats) {
             // Revenue by month — a line chart showing the recent trend.
-            new Chart(document.getElementById("chart-revenue"), {
+            charts["chart-revenue"] = new Chart(document.getElementById("chart-revenue"), {
                 type: "line",
                 data: {
                     labels: stats.revenue_by_month.map((p) => p.month),
@@ -205,7 +248,7 @@
             });
 
             // Orders by status — a doughnut, coloured to match the badges.
-            new Chart(document.getElementById("chart-status"), {
+            charts["chart-status"] = new Chart(document.getElementById("chart-status"), {
                 type: "doughnut",
                 data: {
                     labels: stats.orders_by_status.map((s) => s.status),
@@ -218,7 +261,7 @@
             });
 
             // New customers by month — a simple bar chart.
-            new Chart(document.getElementById("chart-customers"), {
+            charts["chart-customers"] = new Chart(document.getElementById("chart-customers"), {
                 type: "bar",
                 data: {
                     labels: stats.new_customers_by_month.map((p) => p.month),
@@ -241,7 +284,7 @@
             if (stats.top_products.length === 0) {
                 showEmptyChart("chart-top-products", "No orders yet — nothing sold.");
             } else {
-                new Chart(document.getElementById("chart-top-products"), {
+                charts["chart-top-products"] = new Chart(document.getElementById("chart-top-products"), {
                     type: "bar",
                     data: {
                         labels: stats.top_products.map((p) => p.name),
@@ -266,7 +309,7 @@
             if (stats.products_by_category.length === 0) {
                 showEmptyChart("chart-categories", "No categories have products yet.");
             } else {
-                new Chart(document.getElementById("chart-categories"), {
+                charts["chart-categories"] = new Chart(document.getElementById("chart-categories"), {
                     type: "doughnut",
                     data: {
                         labels: stats.products_by_category.map((c) => c.category),
@@ -283,7 +326,7 @@
             if (stats.low_stock_products.length === 0) {
                 showEmptyChart("chart-low-stock", "No products are low on stock.");
             } else {
-                new Chart(document.getElementById("chart-low-stock"), {
+                charts["chart-low-stock"] = new Chart(document.getElementById("chart-low-stock"), {
                     type: "bar",
                     data: {
                         labels: stats.low_stock_products.map((p) => p.name),
@@ -304,6 +347,37 @@
                 });
             }
         }
+
+        // Save one chart as a PNG file. Chart.js canvases are transparent, so
+        // we paint a white background behind the chart first — otherwise the
+        // downloaded image would look broken outside a white page.
+        function downloadChartPng(canvasId, filename) {
+            const chart = charts[canvasId];
+            if (!chart) return;
+
+            const sourceCanvas = chart.canvas;
+            const exportCanvas = document.createElement("canvas");
+            exportCanvas.width = sourceCanvas.width;
+            exportCanvas.height = sourceCanvas.height;
+
+            const ctx = exportCanvas.getContext("2d");
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+            ctx.drawImage(sourceCanvas, 0, 0);
+
+            const link = document.createElement("a");
+            link.href = exportCanvas.toDataURL("image/png");
+            link.download = filename;
+            link.click();
+        }
+
+        // One listener for every "Download PNG" button (event delegation),
+        // since the buttons exist before their charts are drawn.
+        document.getElementById("charts-grid").addEventListener("click", (event) => {
+            const button = event.target.closest(".chart-download-btn");
+            if (!button || button.disabled) return;
+            downloadChartPng(button.dataset.chart, button.dataset.filename);
+        });
 
         // 3. The chatbot: open/close the panel, send questions, show replies.
         const chatHistory = [];   // [{role, content}, ...] — replayed to the API

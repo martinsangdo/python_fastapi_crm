@@ -746,10 +746,22 @@ table.data td:last-child {
 }
 
 .chart-panel h2 {
-    margin-bottom: 0.9rem;
     font-size: 1rem;
     font-weight: 600;
     color: var(--ink);
+}
+
+/* Chart title + its "Download PNG" button, side by side. */
+.chart-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+}
+
+.chart-download-btn {
+    flex-shrink: 0;
 }
 
 .chart-panel .chart-wrap {
