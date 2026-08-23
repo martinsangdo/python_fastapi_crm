@@ -1,0 +1,32 @@
+# Secrets and local config — never bake these into the image
+.env
+.env.*
+!.env.example
+google-service-account.json
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+venv/
+.venv/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Docs, tests, and misc project files not needed at runtime
+docs/
+tests/
+logs/
+cnn-design-system/
+postgres-sql-architect/
+README.md
+CLAUDE.md
+.vercel
