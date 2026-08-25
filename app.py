@@ -21,7 +21,17 @@ import models  # noqa: F401  (importing registers the User model on Base)
 from database import Base, engine
 from dependencies import get_current_user
 from models import User
-from routers import auth, categories, customers, dashboard, orders, products, public_tasks, users
+from routers import (
+    auth,
+    categories,
+    customers,
+    dashboard,
+    health,
+    orders,
+    products,
+    public_tasks,
+    users,
+)
 from schemas.auth_schemas import UserPublic
 
 # Create the application instance.
@@ -61,6 +71,9 @@ app.include_router(dashboard.router)
 
 # Plug in the public, API-key-protected task endpoints (/api/public/tasks/...).
 app.include_router(public_tasks.router)
+
+# Public database health check (/api/health).
+app.include_router(health.router)
 
 
 # ---------------------------------------------------------------------------
