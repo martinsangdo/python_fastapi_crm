@@ -150,6 +150,9 @@ activemq-data/
 # Environments
 .env
 .envrc
+
+# Local database backup archives (the source of truth is Google Drive)
+backups/
 .venv
 env/
 venv/

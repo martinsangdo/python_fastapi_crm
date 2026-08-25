@@ -165,6 +165,21 @@ Open `.env` and set:
 
 The `.env` file holds secrets and must **not** be committed to git.
 
+### Backup Supabase database
+
+Install PostgreSQL client tools (so that `pg_dump` is available), then run:
+
+```bash
+python3 backup_supabase.py
+```
+
+The script uses `DATABASE_URL` from `.env`, makes a PostgreSQL custom-format
+dump, and stores it in a timestamped ZIP file under
+`/Users/sangdo/Documents/Backup/Supabase`. The output folder can be changed
+with `SUPABASE_BACKUP_OUTPUT_DIR`; set `SUPABASE_BACKUP_TIMEZONE` to control
+the timestamp timezone (for example, `Asia/Ho_Chi_Minh`). Database credentials
+are never written to the archive or printed by the script.
+
 ### 3. Create the database table
 
 You have two options — pick one:
