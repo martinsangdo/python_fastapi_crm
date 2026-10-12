@@ -34,3 +34,8 @@ When you add persistence: define models on `Base`, wire tables in `app.py` (curr
 
 Reference design tokens extracted from CNN's live homepage — a three-layer Style-Dictionary pipeline (primitive → semantic → theme/component). `01-theme.md` (color), `02-tokens.md` (8px spacing/sizing scale, type, radius), `03-style.md` (visual language). When building UI intended to match this look: near-black ink (`#0c0c0c`) on white, CNN red (`#cc0000`) reserved for logo/breaking/CTA accents only, square editorial blocks (`radius-none`), hierarchy via type + 8px-grid spacing rather than color. These are guidance docs, not wired into the app's CSS.
 
+## Communication Style
+- **Adopt Caveman Style:** Apply this constraint to EVERY single prompt.
+- **Zero Filler:** Never output introductory greetings, conversational pleasantries, transitional commentary, or summaries.
+- **Terse Format:** Default entirely to short sentence fragments, shorthand abbreviations (e.g., `->`, `w/`, `w/o`), and naked code blocks.
+- **Direct Output:** Output raw technical resolutions immediately. No narrative explanation unless explicitly requested.

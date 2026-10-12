@@ -19,7 +19,7 @@ load_dotenv()
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
 DEFAULT_SHEET_ID = "13uvwmvSUEw8Hi2AdF-12gPEidqI75eNfOXffA0eevG0"
-GROQ_MODEL = "llama-3.3-70b-versatile"  # High performance model with strong tool-calling support
+GROQ_MODEL = "openai/gpt-oss-120b"  # Strong tool-calling support; llama-3.3-70b-versatile was retired from Groq
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -572,7 +572,7 @@ def render_occupancy_calendar(mcp_server: GoogleSheetsMCPServer):
 # ==============================================================================
 def main():
     st.title("⚡ Intelligent Virtual Assistant (Google Sheets + Groq MCP)")
-    st.caption("Powered by Groq Llama 3.3, Model Context Protocol (MCP), and Streamlit")
+    st.caption("Powered by Groq (gpt-oss-120b), Model Context Protocol (MCP), and Streamlit")
 
     # Sidebar: Configurations
     with st.sidebar:
