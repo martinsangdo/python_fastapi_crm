@@ -21,7 +21,7 @@ load_dotenv()
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
 DEFAULT_FOLDER_ID = "1sHrT3SIBBDCBwpDSE_eKiLWWQ7OqbFaj"  # paste your public Google Drive folder ID or share link here
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"  # Strong tool-calling support; llama-3.3-70b-versatile was retired from Groq
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
@@ -470,7 +470,7 @@ def load_rag_server(folder_input: str, api_key: str, credentials_dict: Optional[
 
 def main():
     st.title("📚 Document Q&A Assistant (Google Drive)")
-    st.caption("Ask questions about documents in a public Google Drive folder - powered by Groq Llama 3.3 and MCP-style tools")
+    st.caption("Ask questions about documents in a public Google Drive folder - powered by Groq (gpt-oss-120b) and MCP-style tools")
 
     with st.sidebar:
         st.header("⚙️ Configuration")
