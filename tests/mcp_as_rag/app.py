@@ -28,6 +28,15 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 150
 
+# Groq free tier caps each request at 8000 tokens-per-minute (TPM), and the cap counts
+# prompt tokens PLUS the max completion tokens we ask for. These limits keep every
+# request well under that: few passages, short history, bounded output.
+MAX_TOP_K = 3                 # passages returned per search (model may ask for fewer, never more)
+MAX_HISTORY_MESSAGES = 3      # recent chat messages sent to the model (user, assistant, user)
+MAX_COMPLETION_TOKENS = 1500  # cap on the model's reply, incl. reasoning tokens
+MAX_PROMPT_TOKENS = 5500      # hard ceiling on the prompt; 5500 + MAX_COMPLETION_TOKENS stays under 8000
+MAX_TOOL_ROUNDS = 3           # tool-call rounds per question; each round re-sends the whole conversation
+
 SUPPORTED_MIME_TYPES = {
     "application/vnd.google-apps.document",
     "application/pdf",
@@ -242,7 +251,7 @@ class DriveRAGServer:
                         "type": "object",
                         "properties": {
                             "query": {"type": "string", "description": "What to search for."},
-                            "top_k": {"type": "integer", "description": "Number of passages to return (default 5)."},
+                            "top_k": {"type": "integer", "description": f"Number of passages to return (default {MAX_TOP_K}, max {MAX_TOP_K})."},
                         },
                         "required": ["query"],
                     },
@@ -265,7 +274,7 @@ class DriveRAGServer:
 
             elif name == "search_documents":
                 query = str(arguments.get("query", "")).strip()
-                top_k = int(arguments.get("top_k", 5))
+                top_k = max(1, min(int(arguments.get("top_k", MAX_TOP_K)), MAX_TOP_K))
                 if not query or self.vectorizer is None:
                     return json.dumps({"query": query, "results": []})
 
@@ -350,6 +359,22 @@ class RAGAgent:
         return "\n".join(lines)
 
     @staticmethod
+    def _fit_to_budget(conversation: List[Dict[str, Any]]) -> None:
+        """Guarantees the prompt fits MAX_PROMPT_TOKENS by halving the longest message
+        (usually an old tool result) until it does. Token count is estimated at 2 chars
+        per token - deliberately pessimistic, since non-English text tokenizes poorly -
+        so we may trim a little more than needed but never send an oversized request."""
+        while len(json.dumps(conversation, ensure_ascii=False)) // 2 > MAX_PROMPT_TOKENS:
+            trimmable = [
+                m for m in conversation[1:]  # [0] is the system prompt - never trim it
+                if isinstance(m.get("content"), str) and len(m["content"]) > 200
+            ]
+            if not trimmable:
+                return
+            longest = max(trimmable, key=lambda m: len(m["content"]))
+            longest["content"] = longest["content"][: len(longest["content"]) // 2]
+
+    @staticmethod
     def _last_user_message(conversation: List[Dict[str, Any]]) -> str:
         for msg in reversed(conversation):
             if msg.get("role") == "user" and isinstance(msg.get("content"), str):
@@ -359,9 +384,9 @@ class RAGAgent:
     def _deterministic_recovery_call(self, conversation: List[Dict[str, Any]]) -> tuple:
         """Ignores whatever the model tried to invent and just searches with the user's
         own question - safer than guessing at a malformed tool call's intent."""
-        return "search_documents", {"query": self._last_user_message(conversation), "top_k": 5}
+        return "search_documents", {"query": self._last_user_message(conversation), "top_k": MAX_TOP_K}
 
-    def run(self, messages: List[Dict[str, Any]], max_rounds: int = 4) -> str:
+    def run(self, messages: List[Dict[str, Any]], max_rounds: int = MAX_TOOL_ROUNDS) -> str:
         """Executes a multi-round Tool-Use loop with Groq.
 
         The model often needs more than one tool call per question - e.g. it lists
@@ -385,16 +410,21 @@ class RAGAgent:
             )
         }
 
-        conversation = [system_prompt] + messages
+        # Only the most recent messages go to the model - the full history would blow the TPM cap.
+        conversation = [system_prompt] + messages[-MAX_HISTORY_MESSAGES:]
         last_result = None
 
         for _ in range(max_rounds):
+            self._fit_to_budget(conversation)
             response = self.llm_client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=conversation,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.1
+                temperature=0.1,
+                max_completion_tokens=MAX_COMPLETION_TOKENS,
+                # gpt-oss reasoning tokens count toward the cap; "low" keeps them small.
+                extra_body={"reasoning_effort": "low"},
             )
             response_message = response.choices[0].message
 
