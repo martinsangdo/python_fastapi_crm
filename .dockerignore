@@ -30,3 +30,8 @@ postgres-sql-architect/
 README.md
 CLAUDE.md
 .vercel
+
+# Database backups and local tooling — never ship in the image
+backups/
+.claude/
+.claudeignore
